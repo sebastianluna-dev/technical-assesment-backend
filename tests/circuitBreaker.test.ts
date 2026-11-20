@@ -263,3 +263,92 @@ describe("circuit breaker: call timeout", () => {
     expect(breaker.getState()).toBe("open");
   });
 });
+
+describe("circuit breaker: pending calls from an earlier cycle", () => {
+  const SHORT_RESET_MS = 100;
+
+  /** Opens the circuit, waits out the short open period and closes it with a probe. */
+  async function openAndRecover(): Promise<void> {
+    await failTimes(3);
+    expect(breaker.getState()).toBe("open");
+    await vi.advanceTimersByTimeAsync(SHORT_RESET_MS);
+    await breaker.execute(succeed());
+    expect(breaker.getState()).toBe("closed");
+  }
+
+  beforeEach(() => {
+    breaker = createCircuitBreaker({ resetTimeoutMs: SHORT_RESET_MS });
+  });
+
+  it("does not count a failure that started before the circuit opened and recovered", async () => {
+    const stale = deferred<string>();
+    const staleCall = breaker.execute(stale.operation).catch((error: Error) => error);
+    await openAndRecover();
+
+    stale.reject(new Error("late failure"));
+    expect(((await staleCall) as Error).message).toBe("late failure");
+
+    // Two fresh failures are below the threshold of three.
+    await failTimes(2);
+    expect(breaker.getState()).toBe("closed");
+    await failTimes(1);
+    expect(breaker.getState()).toBe("open");
+  });
+
+  it("does not let a success from before the circuit opened reset the new count", async () => {
+    const stale = deferred<string>();
+    const staleCall = breaker.execute(stale.operation);
+    await openAndRecover();
+
+    await failTimes(2);
+    stale.resolve("late success");
+    expect(await staleCall).toBe("late success");
+
+    await failTimes(1);
+    expect(breaker.getState()).toBe("open");
+  });
+
+  it("ignores stale calls that settle while the circuit is open, and invokes nothing", async () => {
+    const staleFailure = deferred<string>();
+    const staleSuccess = deferred<string>();
+    const failing = breaker.execute(staleFailure.operation).catch(() => undefined);
+    const succeeding = breaker.execute(staleSuccess.operation);
+    await failTimes(3);
+    await vi.advanceTimersByTimeAsync(SHORT_RESET_MS - 1);
+
+    staleFailure.reject(new Error("late failure"));
+    staleSuccess.resolve("late success");
+    await failing;
+    await succeeding;
+    expect(breaker.getState()).toBe("open");
+
+    const operation = succeed();
+    await expect(breaker.execute(operation)).rejects.toBeInstanceOf(CircuitOpenError);
+    expect(operation).not.toHaveBeenCalled();
+
+    // The open period was not extended: it still ends at the original time.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(breaker.getState()).toBe("half-open");
+  });
+
+  it("keeps a single probe when a stale call settles during half-open", async () => {
+    const stale = deferred<string>();
+    const staleCall = breaker.execute(stale.operation).catch(() => undefined);
+    await failTimes(3);
+    await vi.advanceTimersByTimeAsync(SHORT_RESET_MS);
+
+    const probe = deferred<string>();
+    const probeCall = breaker.execute(probe.operation);
+    stale.reject(new Error("late failure"));
+    await staleCall;
+
+    expect(breaker.getState()).toBe("half-open");
+    const second = succeed();
+    await expect(breaker.execute(second)).rejects.toBeInstanceOf(CircuitOpenError);
+    expect(second).not.toHaveBeenCalled();
+
+    probe.resolve("ok");
+    expect(await probeCall).toBe("ok");
+    expect(breaker.getState()).toBe("closed");
+  });
+});

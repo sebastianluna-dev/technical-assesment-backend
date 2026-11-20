@@ -334,3 +334,14 @@ A stricter alternative, requiring the same separator throughout a number, would 
 - `0` remains a valid value in both places and skips the timer entirely. Unit tests of the mock pass `delayMs: 0` unless they are measuring the delay; HTTP tests inject their own AI client and never used the mock's delay.
 - `failureRate` and the injectable `random` are unchanged, so failures stay deterministic in tests.
 - The demo script keeps its own explicit 600 ms (`DEMO_AI_DELAY_MS`); with 2,000 ms its five calls that reach the mock would take ten seconds.
+
+## 55. Circuit breaker calls are tied to the cycle they started in
+
+**Defect.** A call that started while the circuit was closed could settle after the circuit had opened and recovered. The breaker only checked that the state was "closed" at that moment, so it applied the old outcome to the new closed period: a late failure counted as the first failure of the new period, and a late success erased failures already counted in it. With the 5-second call timeout and the default 30-second open period this cannot happen, but it can whenever `CIRCUIT_RESET_MS` is shorter than the call timeout.
+
+**Fix.** The breaker keeps a `cycle` counter that increases on every state change (to open, to half-open, to closed). A call stores the counter when it starts and reports its outcome only if the counter is unchanged when it settles. A stale call still returns its own result or error to its caller; it just changes nothing in the breaker.
+
+- All state changes go through one function, `enter`, which also resets the failure count and the trial flag. This removed the separate bookkeeping of "is this call the trial".
+- The single trial is preserved: half-open admits one call, and only a call started in that half-open cycle can close or reopen the circuit.
+- A counter was preferred to comparing timestamps (two changes can share a millisecond, and tests replace the clock) and to cancelling pending calls (the operation is an opaque promise that cannot be cancelled).
+- The open check is unchanged: an open circuit rejects before invoking the operation.

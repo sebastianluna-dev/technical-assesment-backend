@@ -299,7 +299,7 @@ npm test
 npm run typecheck
 ```
 
-409 tests in 10 files, about two seconds.
+413 tests in 10 files, about two seconds.
 
 | File | Covers |
 | --- | --- |

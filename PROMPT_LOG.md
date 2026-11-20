@@ -500,3 +500,38 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 - The Docker image was not rebuilt, so the two-second default was not timed in a container.
 - The README's manual circuit-breaker walkthrough was not rerun; it sets `MOCK_AI_DELAY_MS=600` explicitly and is not affected by the default.
 - Nothing was pushed.
+
+---
+
+## 11. Circuit breaker: pending calls from an earlier cycle
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Fix the circuit breaker so that a pending call from an earlier cycle cannot change its state after recovery. First reproduce the issue using a short recovery period and pending operations. Use a simple mechanism to distinguish cycles, preserve the single trial call in half-open, and add a focused regression test. Also verify that an open circuit does not invoke the operation.
+
+**Outcome:**
+
+- Reproduced first. Four tests were added to `tests/circuitBreaker.test.ts` with a 100 ms open period and operations kept pending by hand, and run against the unchanged breaker: 2 failed.
+  - A call pending since before the circuit opened and recovered was rejected; two fresh failures then opened the circuit (expected "closed", received "open").
+  - The same kind of call resolved after two fresh failures; a third failure then did not open the circuit (expected "open", received "closed").
+- Fix in `src/services/circuitBreaker.ts`: a `cycle` counter that increases on every state change. A call records the counter when it starts and its outcome is applied only if the counter has not changed. State changes go through one function, `enter`.
+- The other two new tests passed before and after the fix and stay as guards: stale calls settling while the circuit is open neither change the state nor extend the open period, and a new call is rejected without invoking its operation; a stale call settling during half-open does not release or replace the single probe.
+- Decision 55 added. README test count updated to 413.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| New tests against the previous code | 2 failed, 2 passed, as described above |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` after the fix | 10 test files, 413 tests, all passed (the 23 earlier circuit-breaker tests unchanged) |
+| Open circuit does not invoke the operation | Asserted in the new tests for the open state and for a second call during half-open, in addition to the existing "fourth call" tests at unit and HTTP level |
+| `npm run demo` | All 16 checks passed |
+
+**Not checked:**
+
+- The defect was reproduced in unit tests with fake timers only, not on a running server. Reaching it there needs `CIRCUIT_RESET_MS` below the 5-second call timeout and a mock slower than the open period.
+- The Docker image was not rebuilt.
+- Nothing was pushed.
