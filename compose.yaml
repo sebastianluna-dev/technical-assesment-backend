@@ -1,0 +1,20 @@
+services:
+  api:
+    build:
+      context: .
+    image: technical-assessment-backend:local
+    # Reads ENCRYPTION_KEY and the optional settings from .env (not in Git).
+    env_file: .env
+    environment:
+      # Fixed inside the container, whatever .env says.
+      PORT: "3000"
+      AUDIT_LOG_PATH: /app/data/audit-log.json
+    ports:
+      # Reachable from this machine only. HOST_PORT picks another local port
+      # when 3000 is taken: HOST_PORT=3001 docker compose up
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
+    volumes:
+      - audit-data:/app/data
+
+volumes:
+  audit-data:

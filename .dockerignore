@@ -1,0 +1,25 @@
+# Never send secrets or runtime data to the build context.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+data/
+logs/
+*.log
+
+node_modules/
+dist/
+coverage/
+.git/
+.gitignore
+.DS_Store
+
+# Not needed in the image.
+tests/
+scripts/
+docs/
+*.md
+Dockerfile
+compose.yaml
+vitest.config.ts
