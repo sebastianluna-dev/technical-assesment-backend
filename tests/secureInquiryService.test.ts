@@ -162,7 +162,7 @@ describe("secure inquiry service: AI failures", () => {
 
     expect(await handle()).toMatchObject({ status: 503, answer: "Service Busy" });
     expect(stored[0]!.outcome).toBe("ai_failure");
-    expect(logger.warn.mock.calls[0]![1]).toMatchObject({ error: "UnusableAnswerError" });
+    expect(logger.warn.mock.calls[0]![1]).toMatchObject({ error: "TypeError" });
   });
 
   it("counts unusable answers in the breaker", async () => {

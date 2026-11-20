@@ -23,16 +23,15 @@ export interface AppDependencies {
  * Everything with state or I/O is passed in.
  */
 export function createApp(dependencies: AppDependencies): Express {
-  const { logger = consoleLogger, ...services } = dependencies;
+  const { logger = consoleLogger, ...inquiryDependencies } = dependencies;
+  const secureInquiryService = createSecureInquiryService({ ...inquiryDependencies, logger });
+
   const app = express();
 
   app.disable("x-powered-by");
 
   app.use("/health", healthRouter);
-  app.use(
-    "/secure-inquiry",
-    createSecureInquiryRouter(createSecureInquiryService({ ...services, logger })),
-  );
+  app.use("/secure-inquiry", createSecureInquiryRouter(secureInquiryService));
 
   app.use(notFound);
   app.use(createErrorHandler(logger));

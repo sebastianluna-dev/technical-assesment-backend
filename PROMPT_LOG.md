@@ -568,3 +568,35 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 
 - The Docker image was not rebuilt.
 - Nothing was pushed.
+
+---
+
+## 13. Readability of the application setup and the inquiry service
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Improve readability in the application setup and inquiry service. In app.ts, assign the service to a clearly named variable before passing it to the router. Check whether UnusableAnswerError provides distinct behavior; otherwise, simplify it while preserving response validation. Keep AI errors separate from audit errors. Limit naming and comment cleanup to the affected files and run the relevant checks.
+
+**Outcome:**
+
+- `src/app.ts`: the service is built into `secureInquiryService` and then passed to the router on one line. The rest of the dependencies, previously named `services`, are now `inquiryDependencies`.
+- `UnusableAnswerError`: checked and found to have no distinct behaviour (never caught by type, not imported elsewhere, handled like every other AI failure). Removed. The check is now `requireUsableAnswer`, which throws a `TypeError` and still runs inside the circuit breaker.
+- `src/services/secureInquiry.ts`: `handle` reads as four lines of steps. The AI call moved to `askAi`, which never throws, and the audit write to `writeAuditRecord`, which is outside the breaker and is the only place that throws `AuditFailureError`.
+- `tests/secureInquiryService.test.ts`: one expectation changed, the error name in the log line for an unusable answer (`TypeError`). No other test changed.
+- Only these three files and the two documents were edited. Decision 57 added.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| Search for uses of `UnusableAnswerError` before removing it | One definition and one `throw` in the service, one test expectation on the logged name; no `instanceof`, no import |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 10 test files, 413 tests, all passed. This includes the tests that unusable answers return 503, are audited as `ai_failure` and open the breaker after three, and that audit failures return 500 without counting in the breaker |
+| `npm run demo` | All 16 checks passed |
+
+**Not checked:**
+
+- The Docker image was not rebuilt.
+- Nothing was pushed.

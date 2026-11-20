@@ -35,14 +35,6 @@ export class AuditFailureError extends Error {
   }
 }
 
-/** The AI call returned, but not with a non-empty string. Counts as an AI failure. */
-export class UnusableAnswerError extends Error {
-  constructor() {
-    super("The AI client returned an unusable answer.");
-    this.name = "UnusableAnswerError";
-  }
-}
-
 export interface SecureInquiryDependencies {
   aiClient: AiClient;
   circuitBreaker: CircuitBreaker;
@@ -63,6 +55,18 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
+/**
+ * Response validation: the answer must be a non-empty string. Anything else
+ * is an AI failure like any other, so this throws a standard TypeError
+ * instead of a dedicated class: nothing needs to tell the two apart.
+ */
+function requireUsableAnswer(generated: unknown): string {
+  if (typeof generated !== "string" || generated === "") {
+    throw new TypeError("The AI client returned an unusable answer.");
+  }
+  return generated;
+}
+
 export function createSecureInquiryService(
   dependencies: SecureInquiryDependencies,
 ): SecureInquiryService {
@@ -76,54 +80,67 @@ export function createSecureInquiryService(
     generateRequestId = randomUUID,
   } = dependencies;
 
+  /**
+   * Asks the AI through the circuit breaker and never throws: any failure
+   * becomes the fallback answer. Only the call and the check of its result
+   * run inside the breaker, so only AI failures and timeouts are counted.
+   */
+  async function askAi(
+    requestId: string,
+    redactedMessage: string,
+  ): Promise<{ outcome: InquiryOutcome; answer: string }> {
+    try {
+      const answer = await circuitBreaker.execute(async () =>
+        requireUsableAnswer(await aiClient.generateAnswer(redactedMessage)),
+      );
+      return { outcome: "answered", answer };
+    } catch (error) {
+      const outcome = error instanceof CircuitOpenError ? "circuit_open" : "ai_failure";
+      logger.warn("ai_unavailable", { requestId, outcome, error: errorName(error) });
+      return { outcome, answer: FALLBACK_ANSWER };
+    }
+  }
+
+  /** Stores the record or throws AuditFailureError. Runs outside the breaker. */
+  async function writeAuditRecord(record: {
+    requestId: string;
+    userId: string;
+    timestamp: string;
+    outcome: InquiryOutcome;
+    message: string;
+    redactedMessage: string;
+  }): Promise<void> {
+    const { message, ...fields } = record;
+    try {
+      await auditRepository.append({
+        ...fields,
+        originalMessage: encryption.encrypt(message),
+      });
+    } catch (error) {
+      logger.error("audit_failed", {
+        requestId: record.requestId,
+        outcome: record.outcome,
+        error: errorName(error),
+        // Safe by construction: describes the file, not its contents.
+        reason: error instanceof AuditFileCorruptedError ? error.reason : undefined,
+        code: (error as NodeJS.ErrnoException | null)?.code,
+      });
+      throw new AuditFailureError(record.requestId, error);
+    }
+  }
+
   return {
     async handle({ userId, message }) {
       const requestId = generateRequestId();
       const timestamp = now().toISOString();
 
-      // 1. Redact. Only the redacted text leaves this function unencrypted.
+      // Only the redacted text leaves this function unencrypted.
       const redactedMessage = redactMessage(message);
 
-      // 2. AI call. Only the call and the check of its result run inside the
-      //    breaker, so only AI failures and timeouts reach its failure count.
-      let outcome: InquiryOutcome;
-      let answer: string;
-      try {
-        answer = await circuitBreaker.execute(async () => {
-          const generated: unknown = await aiClient.generateAnswer(redactedMessage);
-          if (typeof generated !== "string" || generated === "") {
-            throw new UnusableAnswerError();
-          }
-          return generated;
-        });
-        outcome = "answered";
-      } catch (error) {
-        outcome = error instanceof CircuitOpenError ? "circuit_open" : "ai_failure";
-        answer = FALLBACK_ANSWER;
-        logger.warn("ai_unavailable", { requestId, outcome, error: errorName(error) });
-      }
+      const { outcome, answer } = await askAi(requestId, redactedMessage);
 
-      // 3. Audit, for answers and fallbacks alike, before anything is returned.
-      try {
-        await auditRepository.append({
-          requestId,
-          userId,
-          timestamp,
-          outcome,
-          originalMessage: encryption.encrypt(message),
-          redactedMessage,
-        });
-      } catch (error) {
-        logger.error("audit_failed", {
-          requestId,
-          outcome,
-          error: errorName(error),
-          // Safe by construction: describes the file, not its contents.
-          reason: error instanceof AuditFileCorruptedError ? error.reason : undefined,
-          code: (error as NodeJS.ErrnoException | null)?.code,
-        });
-        throw new AuditFailureError(requestId, error);
-      }
+      // Answers and fallbacks are both audited before anything is returned.
+      await writeAuditRecord({ requestId, userId, timestamp, outcome, message, redactedMessage });
 
       return { requestId, status: outcome === "answered" ? 200 : 503, answer };
     },

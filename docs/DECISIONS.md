@@ -355,3 +355,13 @@ The `/secure-inquiry` body was validated by a middleware that stored the result 
 - The route's order is unchanged: `requireJson` (415), the JSON parser with its 64 KB limit, validation (400), service. This updates the description in decision 37 of the route's four steps: the third is no longer a middleware.
 - `requireJson` and the error handler stay in `src/middleware` because they are real Express middleware. No controller layer was added; the handler is still the function in `src/routes/secureInquiry.ts`.
 - Rules, error texts and the 400 response body are the same; the validation and HTTP tests pass without changes other than one import path.
+
+## 57. `UnusableAnswerError` was replaced by a standard `TypeError`
+
+The class existed to mark an AI answer that is not a non-empty string. A review of its uses found no behaviour that depended on it: nothing catches it by type, it was not imported outside the service, and an unusable answer is handled exactly like any other AI failure (counted by the breaker, 503 with the fallback, audited as `ai_failure`). Its only visible effect was the error name written to the `ai_unavailable` log line.
+
+The class was removed. The check stays, in a named function (`requireUsableAnswer`) that still runs inside the circuit breaker and throws a `TypeError`.
+
+Cost: the log line now says `TypeError` instead of `UnusableAnswerError`, so in the logs an unusable answer cannot be told apart from a provider that itself throws a `TypeError`. Both are AI failures and are treated the same.
+
+In the same change the service's `handle` was split into two named steps, `askAi` and `writeAuditRecord`. AI errors and audit errors remain separate: `askAi` never throws and turns every AI failure into the fallback, and `writeAuditRecord` runs outside the breaker and is the only source of `AuditFailureError`. In `app.ts` the service is built into a named variable before it is passed to the router.
