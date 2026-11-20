@@ -18,7 +18,10 @@ function loadEnvOrExit(): Env {
 
 const env = loadEnvOrExit();
 const app = createApp({
-  aiClient: createMockAiClient({ failureRate: env.mockAiFailureRate }),
+  aiClient: createMockAiClient({
+    failureRate: env.mockAiFailureRate,
+    delayMs: env.mockAiDelayMs,
+  }),
   circuitBreaker: createCircuitBreaker({
     failureThreshold: env.circuitFailureThreshold,
     resetTimeoutMs: env.circuitResetMs,

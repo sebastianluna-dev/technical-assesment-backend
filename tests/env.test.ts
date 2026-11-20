@@ -15,6 +15,7 @@ describe("loadEnv", () => {
       circuitFailureThreshold: 3,
       circuitResetMs: 30_000,
       mockAiFailureRate: 0,
+      mockAiDelayMs: 0,
     });
   });
 
@@ -50,11 +51,13 @@ describe("loadEnv: circuit breaker and mock AI", () => {
       CIRCUIT_FAILURE_THRESHOLD: "5",
       CIRCUIT_RESET_MS: "1000",
       MOCK_AI_FAILURE_RATE: "0.25",
+      MOCK_AI_DELAY_MS: "750",
     });
 
     expect(env.circuitFailureThreshold).toBe(5);
     expect(env.circuitResetMs).toBe(1000);
     expect(env.mockAiFailureRate).toBe(0.25);
+    expect(env.mockAiDelayMs).toBe(750);
   });
 
   it.each([
@@ -64,6 +67,8 @@ describe("loadEnv: circuit breaker and mock AI", () => {
     ["CIRCUIT_RESET_MS", "soon"],
     ["MOCK_AI_FAILURE_RATE", "2"],
     ["MOCK_AI_FAILURE_RATE", "-0.1"],
+    ["MOCK_AI_DELAY_MS", "-5"],
+    ["MOCK_AI_DELAY_MS", "0.5"],
   ])("rejects %s=%s", (name, value) => {
     expect(() => loadEnv({ ENCRYPTION_KEY, [name]: value })).toThrow(
       new RegExp(`Invalid ${name}`),

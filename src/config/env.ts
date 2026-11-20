@@ -15,6 +15,8 @@ export interface Env {
   circuitResetMs: number;
   /** Probability (0 to 1) that the mock AI call fails. */
   mockAiFailureRate: number;
+  /** Simulated latency of the mock AI call, in milliseconds. */
+  mockAiDelayMs: number;
 }
 
 const NODE_ENVS: readonly NodeEnv[] = ["development", "test", "production"];
@@ -109,6 +111,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     (value) => value >= 0 && value <= 1,
     "a number between 0 and 1",
   );
+  const mockAiDelayMs = parseNumber(
+    "MOCK_AI_DELAY_MS",
+    source.MOCK_AI_DELAY_MS,
+    0,
+    (value) => Number.isInteger(value) && value >= 0,
+    "an integer of 0 or more",
+  );
 
   return {
     nodeEnv: nodeEnv as NodeEnv,
@@ -118,5 +127,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     circuitFailureThreshold,
     circuitResetMs,
     mockAiFailureRate,
+    mockAiDelayMs,
   };
 }
