@@ -57,3 +57,31 @@ The request asked for `GET /health` only, so unknown paths get Express's default
 ## 14. `x-powered-by` is disabled
 
 The header only advertises the framework. A test asserts it is absent.
+
+## 15. `redactMessage` lives in `src/services` and is pure
+
+`src/services/redaction.ts` exports `redactMessage(message: string): string`. It does no I/O, keeps no state and returns the same output for the same input, so it is tested directly, without Express. It is not wired to any route yet.
+
+## 16. Detection uses three regular expressions and no validation
+
+Emails, card candidates and SSNs are each found by one pattern. Cards are not checked with Luhn and SSNs are not checked against issued ranges, as requested: for redaction, hiding a number that only looks sensitive costs less than leaking a real one that fails a check (a typo in a real card number fails Luhn too). The accepted cost is more false positives, listed in `docs/REDACTION.md`.
+
+## 17. All candidates are collected first, then overlaps are merged
+
+The three patterns run over the original message independently and produce candidate spans. Overlapping candidates are merged into one span that covers all of them and takes the kind of the longest candidate (ties: email, then card, then SSN). Replacement happens once, at the end, over non-overlapping spans.
+
+Running the patterns one after another on partly redacted text was rejected: the result would depend on the order, and nine digits inside a card could be replaced as an SSN, leaving the rest of the card visible.
+
+Merging was chosen over "longest match wins, discard the other" because discarding can leave part of the losing match in the clear. In `4111 1111 1111 1111@example.com` the card and the email `1111@example.com` overlap; the merged span hides both.
+
+## 18. Digit boundaries look only at the adjacent character
+
+A card or SSN candidate cannot start right after a digit or end right before one. Separators are not part of the boundary, so two cards separated by one space are redacted as two cards. The side effect is that a longer grouped number has its first 13 to 19 digits redacted and the rest left visible.
+
+## 19. Bounded repetition in the email pattern
+
+The local part is limited to 64 characters and each domain label to 63, the limits in the email standards. The bounds keep matching time linear on long inputs with no `@`. Measured: 200,000-character worst-case strings take under 50 ms.
+
+## 20. Idempotency comes from the token format
+
+The tokens `<REDACTED: EMAIL>`, `<REDACTED: CREDIT_CARD>` and `<REDACTED: SSN>` contain no digit and no `@`, so no pattern can match inside one, and a token placed between two fragments keeps them from joining into a new match. Tests cover this with adversarial inputs.
