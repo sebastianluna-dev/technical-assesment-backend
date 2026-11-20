@@ -1,6 +1,9 @@
 import { writeFile } from "node:fs/promises";
+import { gzipSync } from "node:zlib";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { AuditRecord } from "../src/repositories/auditRepository.js";
+import { redactMessage } from "../src/services/redaction.js";
 import { createTestApp, FAILURE_THRESHOLD, RESET_MS, type TestApp } from "./helpers/testApp.js";
 
 const MESSAGE = "My card is 4111 1111 1111 1111, SSN 123-45-6789, write to ana+bank@example.mx";
@@ -393,5 +396,500 @@ describe("POST /secure-inquiry: audit failures", () => {
       reason: "the content is not valid JSON",
     });
     expectNoLeak(t.loggedText());
+  });
+});
+
+describe("POST /secure-inquiry: redaction end to end", () => {
+  const cases: Array<[string, string, string[]]> = [
+    [
+      "all three kinds, repeated",
+      "Mail a@example.com and b+x@example.org. Cards 4111 1111 1111 1111, 5500-0000-0000-0004. " +
+        "SSNs 123-45-6789, 987654321. Again: a@example.com / 4111 1111 1111 1111 / 123-45-6789",
+      ["a@example.com", "b+x@example.org", "4111", "5500", "123-45-6789", "987654321"],
+    ],
+    [
+      "overlapping matches",
+      "4111 1111 1111 1111@example.com then 123456789 0123 4567 and 123-45-6789@example.com",
+      ["4111", "example.com", "123456789", "123-45-6789"],
+    ],
+    [
+      "values at numeric boundaries",
+      "13: 4222222222222 19: 6304000000000000000 9: 000000000",
+      ["4222222222222", "6304000000000000000", "000000000"],
+    ],
+    [
+      "values wrapped in markup and punctuation",
+      '<b>"a@example.com"</b> (123-45-6789); [4111-1111-1111-1111]!',
+      ["a@example.com", "123-45-6789", "4111"],
+    ],
+    [
+      "multi-line text with non-ASCII characters",
+      "Señora Núñez:\n\tcorreo → ana@example.mx ✔\r\nSSN\t123-45-6789 🔐",
+      ["ana@example.mx", "123-45-6789"],
+    ],
+  ];
+
+  it.each(cases)("redacts %s before the AI and the audit text", async (_label, message, secrets) => {
+    const response = await post({ userId: "user-1", message });
+    const expected = redactMessage(message);
+
+    expect(response.status).toBe(200);
+    expect(t.generateAnswer).toHaveBeenCalledTimes(1);
+    const prompt = t.generateAnswer.mock.calls[0]![0];
+    expect(prompt).toBe(expected);
+
+    const [record] = await t.readAudit();
+    expect(record!.redactedMessage).toBe(expected);
+    expect(t.encryption.decrypt(record!.originalMessage)).toBe(message);
+
+    const exposed = prompt + response.text + (await t.readAuditFile()) + t.loggedText();
+    for (const secret of secrets) {
+      expect(exposed).not.toContain(secret);
+    }
+  });
+
+  it("passes the exact redaction of the full message for the first case", async () => {
+    await post({ userId: "user-1", message: cases[0]![1] });
+
+    expect(t.generateAnswer).toHaveBeenCalledWith(
+      "Mail <REDACTED: EMAIL> and <REDACTED: EMAIL>. " +
+        "Cards <REDACTED: CREDIT_CARD>, <REDACTED: CREDIT_CARD>. " +
+        "SSNs <REDACTED: SSN>, <REDACTED: SSN>. " +
+        "Again: <REDACTED: EMAIL> / <REDACTED: CREDIT_CARD> / <REDACTED: SSN>",
+    );
+  });
+
+  it("never passes the userId to the AI", async () => {
+    await post({ userId: "synthetic-user-77", message: "hello" });
+
+    expect(JSON.stringify(t.generateAnswer.mock.calls)).not.toContain("synthetic-user-77");
+  });
+
+  it("sends a message without sensitive data unchanged", async () => {
+    await post({ userId: "u", message: "What are your opening hours?" });
+
+    expect(t.generateAnswer).toHaveBeenCalledWith("What are your opening hours?");
+  });
+
+  it("treats tokens typed by the user as plain text", async () => {
+    const message = "I saw <REDACTED: SSN> in my statement";
+    await post({ userId: "u", message });
+
+    const [record] = await t.readAudit();
+    expect(record!.redactedMessage).toBe(message);
+    expect(t.encryption.decrypt(record!.originalMessage)).toBe(message);
+  });
+
+  it.each([
+    ["a maximum-length message", "é".repeat(9_990) + " a@b.co  "],
+    ["control characters", "nul\u0000 bell\u0007 esc\u001B 123-45-6789"],
+    ["JSON and HTML metacharacters", `{"k":"\\\\"} </script> ' " \\n \\u0041`],
+    ["combining marks and emoji sequences", "é 👩‍👩‍👧‍👦 🇲🇽 a@example.com"],
+    ["right-to-left text", "مرحبا 123-45-6789 שלום"],
+  ])("returns %s unchanged from decryption", async (_label, message) => {
+    const response = await post({ userId: "u", message });
+
+    expect(response.status).toBe(200);
+    const [record] = await t.readAudit();
+    expect(t.encryption.decrypt(record!.originalMessage)).toBe(message);
+    expect(record!.redactedMessage).toBe(redactMessage(message));
+  });
+
+  it("stores different ciphertexts for the same message", async () => {
+    await post();
+    await post();
+
+    const [first, second] = await t.readAudit();
+    expect(first!.originalMessage.iv).not.toBe(second!.originalMessage.iv);
+    expect(first!.originalMessage.ciphertext).not.toBe(second!.originalMessage.ciphertext);
+  });
+
+  it("makes tampering with a stored record detectable", async () => {
+    await post();
+    const [record] = await t.readAudit();
+
+    for (const field of ["ciphertext", "iv", "tag"] as const) {
+      const bytes = Buffer.from(record!.originalMessage[field], "base64");
+      bytes[0] = bytes[0]! ^ 0xff;
+      const tampered = { ...record!.originalMessage, [field]: bytes.toString("base64") };
+
+      expect(() => t.encryption.decrypt(tampered)).toThrow(/Decryption failed/);
+    }
+  });
+});
+
+describe("POST /secure-inquiry: adversarial requests", () => {
+  it.each([
+    ["a lone surrogate in the message", { userId: "u", message: "abc\uD83D" }, ["message must be valid Unicode text"]],
+    ["a lone surrogate in the userId", { userId: "\uDE00", message: "hi" }, ["userId must be valid Unicode text"]],
+    ["a message of zero-width characters", { userId: "u", message: "​‍﻿" }, ["message must not be blank"]],
+  ])("rejects %s", async (_label, body, details) => {
+    // Sent as \uXXXX escapes so the request itself is valid UTF-8.
+    const json = JSON.stringify(body).replace(/[\u007f-￿]/g, (c) =>
+      `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+    );
+    const response = await postRaw(json);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "Invalid request", details });
+    await expectNoSideEffects();
+  });
+
+  it("rejects deeply nested JSON without a stack trace", async () => {
+    const response = await postRaw("[".repeat(30_000) + "]".repeat(30_000));
+
+    expect(response.status).toBe(400);
+    expectNoLeak(response.text);
+    await expectNoSideEffects();
+  });
+
+  it("rejects an object with thousands of properties", async () => {
+    const body = Object.fromEntries(Array.from({ length: 5_000 }, (_, i) => [`k${i}`, i]));
+    const response = await post({ ...body, userId: "u", message: "hi" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.details).toEqual(["Only userId and message are allowed"]);
+    await expectNoSideEffects();
+  });
+
+  it("does not pollute object prototypes", async () => {
+    await postRaw(`{"userId":"u","message":"hi","__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}}`);
+
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  /** Sends bytes as they are; Supertest would otherwise serialize the buffer as JSON. */
+  function postGzip(bytes: Buffer) {
+    return request(t.app)
+      .post("/secure-inquiry")
+      .set("Content-Type", "application/json")
+      .set("Content-Encoding", "gzip")
+      .serialize((data) => data as string)
+      .send(bytes as unknown as string);
+  }
+
+  it("rejects a compressed body that inflates past 64 KB", async () => {
+    const bomb = gzipSync(JSON.stringify({ userId: "u", message: MESSAGE, pad: "0".repeat(5_000_000) }));
+    expect(bomb.length).toBeLessThan(65_536);
+
+    const response = await postGzip(bomb);
+
+    expect(response.status).toBe(413);
+    expect(response.body).toEqual({ error: "Request body too large" });
+    expectNoLeak(response.text);
+    await expectNoSideEffects();
+  });
+
+  it("accepts a small compressed body", async () => {
+    const response = await postGzip(gzipSync(JSON.stringify({ userId: "u", message: MESSAGE })));
+
+    expect(response.status).toBe(200);
+    expect(t.generateAnswer).toHaveBeenCalledWith(REDACTED);
+  });
+
+  it("rejects a corrupt compressed body with 400, not 500", async () => {
+    const response = await postGzip(Buffer.from(`not gzip ${MESSAGE}`));
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "Invalid request body" });
+    expectNoLeak(response.text);
+    expect(t.logger.error).not.toHaveBeenCalled();
+    await expectNoSideEffects();
+  });
+
+  it("rejects an unsupported charset", async () => {
+    const response = await postRaw(JSON.stringify({ userId: "u", message: "hi" }), "application/json; charset=latin1");
+
+    expect(response.status).toBe(415);
+    await expectNoSideEffects();
+  });
+
+  it("ignores a request id supplied by the client", async () => {
+    const response = await post().set("X-Request-Id", "client-chosen-id");
+
+    expect(response.headers["x-request-id"]).toMatch(UUID);
+    expect((await t.readAudit())[0]!.requestId).toBe(response.headers["x-request-id"]);
+  });
+
+  it("ignores query parameters and never echoes them", async () => {
+    const response = await request(t.app)
+      .post("/secure-inquiry?userId=evil-4111&message=evil")
+      .send({ userId: "u", message: "hi" });
+
+    expect(response.status).toBe(200);
+    expect((await t.readAudit())[0]!.userId).toBe("u");
+  });
+
+  it.each(["put", "patch", "delete"] as const)("does not accept %s", async (method) => {
+    const response = await request(t.app)[method]("/secure-inquiry").send({ userId: "u", message: "hi" });
+
+    expect(response.status).toBe(404);
+    await expectNoSideEffects();
+  });
+});
+
+describe("POST /secure-inquiry: circuit breaker sequence", () => {
+  it("opens on the third consecutive failure, not before", async () => {
+    failAi();
+
+    await post();
+    await post();
+    expect(t.circuitBreaker.getState()).toBe("closed");
+    await post();
+    expect(t.circuitBreaker.getState()).toBe("open");
+  });
+
+  it("never invokes the mock on the fourth call", async () => {
+    failAi();
+    for (let i = 0; i < 3; i++) {
+      await post();
+    }
+    t.generateAnswer.mockClear();
+
+    const fourth = await post();
+
+    expect(fourth.status).toBe(503);
+    expect(fourth.body).toEqual({ answer: "Service Busy" });
+    expect(t.generateAnswer).not.toHaveBeenCalled();
+    expect((await t.readAudit()).at(-1)!.outcome).toBe("circuit_open");
+  });
+
+  it("resets the counter after a success", async () => {
+    failAi();
+    await post();
+    await post();
+    t.generateAnswer.mockResolvedValueOnce("Generated Answer");
+    expect((await post()).status).toBe(200);
+
+    await post();
+    await post();
+    expect(t.circuitBreaker.getState()).toBe("closed");
+    await post();
+    expect(t.circuitBreaker.getState()).toBe("open");
+    expect(t.generateAnswer).toHaveBeenCalledTimes(6);
+  });
+
+  it("permits only one probe when half-open", async () => {
+    failAi();
+    for (let i = 0; i < 3; i++) {
+      await post();
+    }
+    t.advanceClock(RESET_MS);
+    expect(t.circuitBreaker.getState()).toBe("half-open");
+
+    let finishProbe!: (answer: string) => void;
+    let probeStarted!: () => void;
+    const started = new Promise<void>((resolve) => (probeStarted = resolve));
+    t.generateAnswer.mockReset();
+    t.generateAnswer.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finishProbe = resolve;
+          probeStarted();
+        }),
+    );
+
+    const probe = post().then((response) => response);
+    await started;
+    const rejected = await Promise.all([post(), post(), post()]);
+
+    for (const response of rejected) {
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual({ answer: "Service Busy" });
+    }
+    expect(t.generateAnswer).toHaveBeenCalledTimes(1);
+
+    finishProbe("Generated Answer");
+    const recovered = await probe;
+    expect(recovered.status).toBe(200);
+    expect(recovered.body).toEqual({ answer: "Generated Answer" });
+    expect(t.circuitBreaker.getState()).toBe("closed");
+
+    const outcomes = (await t.readAudit()).slice(3).map((r) => r.outcome).sort();
+    expect(outcomes).toEqual(["answered", "circuit_open", "circuit_open", "circuit_open"]);
+  });
+
+  it("opens again when the probe fails", async () => {
+    failAi();
+    for (let i = 0; i < 3; i++) {
+      await post();
+    }
+    t.advanceClock(RESET_MS);
+
+    expect((await post()).status).toBe(503);
+    expect(t.generateAnswer).toHaveBeenCalledTimes(4);
+    expect(t.circuitBreaker.getState()).toBe("open");
+
+    t.advanceClock(RESET_MS - 1);
+    await post();
+    expect(t.generateAnswer).toHaveBeenCalledTimes(4);
+  });
+
+  it("returns the fallback when the mock is too slow", async () => {
+    await t.cleanup();
+    t = await createTestApp({ timeoutMs: 25 });
+    t.generateAnswer.mockImplementation(() => new Promise(() => undefined));
+
+    const response = await post();
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ answer: "Service Busy" });
+    expect((await t.readAudit())[0]!.outcome).toBe("ai_failure");
+  });
+
+  it("returns the fallback when the mock answers with something unusable", async () => {
+    t.generateAnswer.mockResolvedValue(undefined as unknown as string);
+
+    const response = await post();
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ answer: "Service Busy" });
+  });
+});
+
+describe("POST /secure-inquiry: concurrency", () => {
+  it("stores one decryptable record per request for 60 parallel requests", async () => {
+    const messages = Array.from(
+      { length: 60 },
+      (_, i) => `request ${i}: card 4111 1111 1111 ${String(1000 + i)} from user${i}@example.com`,
+    );
+
+    const responses = await Promise.all(
+      messages.map((message, i) => post({ userId: `user-${i}`, message })),
+    );
+
+    expect(responses.map((r) => r.status)).toEqual(Array(60).fill(200));
+    const records = await t.readAudit();
+    expect(records).toHaveLength(60);
+    expect(new Set(records.map((r) => r.requestId)).size).toBe(60);
+
+    const byUser = new Map(records.map((r) => [r.userId, r]));
+    messages.forEach((message, i) => {
+      const record = byUser.get(`user-${i}`)!;
+      expect(t.encryption.decrypt(record.originalMessage)).toBe(message);
+      expect(record.redactedMessage).toBe(
+        `request ${i}: card <REDACTED: CREDIT_CARD> from <REDACTED: EMAIL>`,
+      );
+    });
+    expectNoLeak(await t.readAuditFile());
+  });
+
+  it("audits every request when successes and failures are mixed", async () => {
+    t.generateAnswer.mockImplementation(async (prompt) => {
+      if (prompt.includes("fail")) {
+        throw new Error("down");
+      }
+      return "Generated Answer";
+    });
+
+    // Sequential, so the consecutive-failure count is deterministic.
+    const statuses: number[] = [];
+    for (const message of ["ok", "fail", "ok", "fail", "fail", "ok"]) {
+      statuses.push((await post({ userId: "u", message })).status);
+    }
+
+    expect(statuses).toEqual([200, 503, 200, 503, 503, 200]);
+    expect((await t.readAudit()).map((r) => r.outcome)).toEqual([
+      "answered",
+      "ai_failure",
+      "answered",
+      "ai_failure",
+      "ai_failure",
+      "answered",
+    ]);
+  });
+});
+
+describe("POST /secure-inquiry: injected storage failures", () => {
+  const SECRET_ERROR = `EACCES: permission denied, open '/data/audit.json' while writing ${MESSAGE}`;
+
+  function failingRepository(error: Error) {
+    return {
+      append: async (_record: AuditRecord): Promise<void> => {
+        throw error;
+      },
+      findAll: async (): Promise<AuditRecord[]> => [],
+    };
+  }
+
+  async function withRepositoryError(error: Error): Promise<void> {
+    await t.cleanup();
+    t = await createTestApp({ auditRepository: failingRepository(error) });
+  }
+
+  it("responds with the generic 500 whatever the storage error says", async () => {
+    await withRepositoryError(Object.assign(new Error(SECRET_ERROR), { code: "EACCES" }));
+    const response = await post();
+
+    expect(response.status).toBe(500);
+    expect(response.text).toBe('{"error":"Internal Server Error"}');
+    expectNoLeak(response.text);
+    expect(response.text).not.toContain("EACCES");
+    expect(response.text).not.toContain("/data/audit.json");
+  });
+
+  it("logs the error code and class, not its message", async () => {
+    await withRepositoryError(Object.assign(new Error(SECRET_ERROR), { code: "EACCES" }));
+    await post();
+
+    expect(t.logger.error).toHaveBeenCalledTimes(1);
+    expect(t.logger.error.mock.calls[0]![1]).toMatchObject({ error: "Error", code: "EACCES" });
+    expectNoLeak(t.loggedText());
+  });
+
+  it("keeps the breaker closed through repeated storage failures", async () => {
+    await withRepositoryError(new Error(SECRET_ERROR));
+
+    for (let i = 0; i < 10; i++) {
+      expect((await post()).status).toBe(500);
+    }
+
+    expect(t.circuitBreaker.getState()).toBe("closed");
+    expect(t.generateAnswer).toHaveBeenCalledTimes(10);
+  });
+
+  it("responds 500 when encryption fails", async () => {
+    await t.cleanup();
+    t = await createTestApp({
+      encryption: {
+        encrypt: () => {
+          throw new Error(`cipher failure for ${MESSAGE}`);
+        },
+        decrypt: () => "",
+      },
+    });
+
+    const response = await post();
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: "Internal Server Error" });
+    expectNoLeak(response.text);
+    expectNoLeak(t.loggedText());
+    expect(await t.readAuditFile()).toBe("");
+  });
+
+  it("responds 500 when the handler throws something that is not an Error", async () => {
+    await t.cleanup();
+    t = await createTestApp({
+      auditRepository: {
+        append: () => Promise.reject(MESSAGE),
+        findAll: async () => [],
+      },
+    });
+
+    const response = await post();
+
+    expect(response.status).toBe(500);
+    expectNoLeak(response.text);
+    expectNoLeak(t.loggedText());
+  });
+
+  it("keeps serving valid requests after a storage failure is repaired", async () => {
+    await writeFile(t.auditFile, "{ broken");
+    expect((await post()).status).toBe(500);
+
+    await writeFile(t.auditFile, '{"version":1,"records":[]}');
+    expect((await post()).status).toBe(200);
+    expect(await t.readAudit()).toHaveLength(1);
   });
 });

@@ -183,7 +183,8 @@ The service (`src/services/secureInquiry.ts`) then does: redact, call the AI thr
 ## 38. Validation rules
 
 - The body must be a JSON object with exactly `userId` and `message`; any other property is rejected rather than ignored.
-- Both must be strings. A value that is empty or only whitespace is rejected.
+- Both must be strings. A value that is empty or only whitespace is rejected. Zero-width characters (U+200B to U+200D, U+2060) count as whitespace for this check, so a value that shows nothing on screen is blank.
+- Both must be well-formed Unicode. A lone surrogate (for example the JSON escape `\ud83d` on its own) is rejected with "must be valid Unicode text": it cannot be encoded as UTF-8, so encryption would replace it and the decrypted original would differ from what was sent.
 - Values are never trimmed or normalized. Blank detection uses a trimmed copy; the stored and processed value is the string as sent, including leading and trailing whitespace.
 - Limits are 100 and 10,000 characters counted as Unicode code points, so an emoji or an accented letter is one character. The 64 KB limit is on bytes of the raw body and is enforced by the parser (413).
 - All problems are reported together in `details`.
@@ -198,7 +199,8 @@ Not detectable: duplicate keys in the JSON text. The parser keeps the last one.
 | --- | --- | --- |
 | 400 | `{"error":"Invalid request","details":[...]}` | Validation failed |
 | 400 | `{"error":"Malformed JSON"}` | Body is not a JSON object or array |
-| 413 | `{"error":"Request body too large"}` | Body over 64 KB |
+| 400 | `{"error":"Invalid request body"}` | The body could not be read, for example a corrupt gzip stream |
+| 413 | `{"error":"Request body too large"}` | Body over 64 KB, measured after decompression |
 | 415 | `{"error":"Content-Type must be application/json"}` | Other or missing content type |
 | 404 | `{"error":"Not Found"}` | Unknown route or method |
 | 500 | `{"error":"Internal Server Error"}` | Audit failure or any unexpected error |
@@ -210,7 +212,7 @@ Not detectable: duplicate keys in the JSON text. The parser keeps the last one.
 | Outcome in the audit record | Response |
 | --- | --- |
 | `answered` | 200 `{"answer":"Generated Answer"}` (the text returned by the AI client) |
-| `ai_failure` (the call failed or timed out) | 503 `{"answer":"Service Busy"}` |
+| `ai_failure` (the call failed, timed out or returned something other than a non-empty string) | 503 `{"answer":"Service Busy"}` |
 | `circuit_open` (the call was not attempted) | 503 `{"answer":"Service Busy"}` |
 
 The two fallback cases look the same to the client and are told apart in the audit record. Requests rejected by validation are not audited: they are not valid requests, and auditing them would store unvalidated input.
@@ -223,7 +225,7 @@ The AI call happens before the audit write, so a failed audit means an AI call w
 
 ## 42. What the breaker counts
 
-Only the function passed to `circuitBreaker.execute` is counted, and that function contains only `aiClient.generateAnswer(redactedMessage)`. Content-type, parsing and validation errors return before the service runs. Redaction runs before the breaker and encryption and storage after it. Tests send invalid requests and force storage failures and assert the circuit stays closed.
+Only the function passed to `circuitBreaker.execute` is counted, and that function contains only `aiClient.generateAnswer(redactedMessage)` and the check that it returned a non-empty string. Content-type, parsing and validation errors return before the service runs. Redaction runs before the breaker and encryption and storage after it. Tests send invalid requests and force storage failures and assert the circuit stays closed.
 
 ## 43. Logging is structured and limited to identifiers
 
@@ -232,3 +234,29 @@ Only the function passed to `circuitBreaker.execute` is counted, and that functi
 ## 44. `X-Request-Id` response header
 
 Responses that reached the service (200, 503 and audit-failure 500) carry the generated request id, which is the `requestId` of the audit record and of the log line. It was not requested; it lets a client report a problem without anyone needing the message contents. Incoming `X-Request-Id` headers are ignored.
+
+## 45. Test strategy
+
+| Level | Files | How |
+| --- | --- | --- |
+| Pure units | `redaction`, `validation`, `encryption`, `env` | Direct calls, no I/O |
+| Time-dependent units | `circuitBreaker`, `mockAiClient`, `secureInquiryService` | Vitest fake timers: the 30 s open period, the 5 s call timeout and record timestamps are driven by `vi.advanceTimersByTime`, never by waiting |
+| File-backed unit | `auditRepository` | A new temporary directory per test, removed afterwards |
+| HTTP | `secureInquiry`, `health` | Supertest against `createApp()` with injected dependencies: a temporary audit file, a real breaker on an injected clock, a `vi.fn` AI client and a recording logger |
+
+HTTP tests do not use fake timers, because Supertest needs real sockets; they move the breaker's injected clock instead. Two HTTP tests use real time on purpose: the slow-mock test (25 ms timeout) and the performance bounds on redaction (under 1 second for 100,000 characters; they take a few milliseconds).
+
+All data is synthetic: test card numbers such as `4111 1111 1111 1111`, the SSN `123-45-6789`, `example.com` addresses and keys from `randomBytes`. No test reads `.env`, `process.env` or `data/`.
+
+The service unit tests replace the repository and the encryption with fakes; the HTTP tests use the real ones, so the same flow is checked once in isolation and once end to end.
+
+## 46. Problems found by the completed test suite and fixed
+
+Writing the adversarial tests exposed four defects in the code, each fixed with the test kept:
+
+1. **Lone surrogates broke the round trip.** A message containing an unpaired surrogate was accepted, and decryption returned U+FFFD in its place. Validation now rejects it (decision 38).
+2. **Zero-width-only values passed as non-blank.** `trim()` does not remove U+200B. Validation now treats them as blank.
+3. **An unusable AI answer produced a 200 with no answer.** If the client resolved with `undefined`, the response was `{}`. A result that is not a non-empty string is now an AI failure: 503, audited, counted by the breaker.
+4. **A corrupt gzip body returned 500.** The parser's error had a 400 status but no known type, so it fell through to the generic handler and was logged as unexpected. Client errors with a 4xx status now return that status with a fixed text.
+
+Three new tests failed because their expectations were wrong, not the code: two redaction cases that hit documented behaviour (digits after a card are absorbed; short numbers in a row add up to a card candidate) and one that sent gzip bytes through Supertest's JSON serializer. The redaction cases were kept as tests of the documented behaviour and added to `docs/REDACTION.md`.

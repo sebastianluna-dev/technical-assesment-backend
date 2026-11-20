@@ -16,6 +16,7 @@
   - `123456789 0123 4567` → `<REDACTED: CREDIT_CARD>` (the nine digits are not treated as an SSN).
   - `123-45-6789@example.com` → `<REDACTED: EMAIL>`.
   - `4111 1111 1111 1111@example.com` → `<REDACTED: CREDIT_CARD>` (the card and the email `1111@example.com` overlap; one token hides both).
+  - `4111 1111 1111 1111 123-45-6789` → `<REDACTED: CREDIT_CARD>`. The card candidate absorbs the first three digits of the SSN, the two overlap and are merged: both values are hidden, but the output shows one token, not two. With a comma between them the result is `<REDACTED: CREDIT_CARD>, <REDACTED: SSN>`.
 - **Everything else is preserved**: punctuation, spacing, line breaks and non-ASCII text.
 - **Idempotent.** The tokens contain no digit and no `@`, so redacting redacted text changes nothing.
 
@@ -56,6 +57,7 @@ Any 13 to 19 digits, alone or separated by single spaces or hyphens:
 - IMEI numbers, bank account numbers, tracking numbers and long order or invoice IDs.
 - Phone numbers with a country code, when they reach 13 digits: `+52 55 1234 5678 9012` becomes `+<REDACTED: CREDIT_CARD>`.
 - Several short numbers in a row: `2024 2025 2026 2027` is 16 digits and is redacted.
+- A decimal next to a date and a time: `3.14159265 2026-11-20 10:30` becomes `3.<REDACTED: CREDIT_CARD>:30`, because 8 + 8 + 2 digits separated only by spaces and hyphens read as one 18-digit candidate. With other punctuation between them (`pi 3.14159265, on 2026-11-20 at 10:30:15`) nothing is redacted.
 
 ### As an SSN
 

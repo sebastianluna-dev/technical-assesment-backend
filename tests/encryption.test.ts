@@ -175,6 +175,19 @@ describe("createEncryptionService", () => {
     );
   });
 
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+  ])("rejects a missing key (%s)", (_label, missing) => {
+    expect(() => createEncryptionService(missing as unknown as Buffer)).toThrow(
+      /must be a 32-byte Buffer/,
+    );
+  });
+
+  it("never encrypts with an all-zero fallback when the key is missing", () => {
+    expect(() => createEncryptionService(Buffer.alloc(0))).toThrow();
+  });
+
   it("rejects a key that is not a Buffer", () => {
     expect(() =>
       createEncryptionService(key.toString("base64") as unknown as Buffer),

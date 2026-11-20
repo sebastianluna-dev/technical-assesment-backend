@@ -34,6 +34,14 @@ export class AuditFailureError extends Error {
   }
 }
 
+/** The AI call returned, but not with a non-empty string. Counts as an AI failure. */
+export class UnusableAnswerError extends Error {
+  constructor() {
+    super("The AI client returned an unusable answer.");
+    this.name = "UnusableAnswerError";
+  }
+}
+
 export interface SecureInquiryDependencies {
   aiClient: AiClient;
   circuitBreaker: CircuitBreaker;
@@ -75,14 +83,18 @@ export function createSecureInquiryService(
       // 1. Redact. Only the redacted text leaves this function unencrypted.
       const redactedMessage = redactMessage(message);
 
-      // 2. AI call. Nothing else runs inside the breaker, so only AI
-      //    failures and timeouts reach its failure count.
+      // 2. AI call. Only the call and the check of its result run inside the
+      //    breaker, so only AI failures and timeouts reach its failure count.
       let outcome: InquiryOutcome;
       let answer: string;
       try {
-        answer = await circuitBreaker.execute(() =>
-          aiClient.generateAnswer(redactedMessage),
-        );
+        answer = await circuitBreaker.execute(async () => {
+          const generated: unknown = await aiClient.generateAnswer(redactedMessage);
+          if (typeof generated !== "string" || generated === "") {
+            throw new UnusableAnswerError();
+          }
+          return generated;
+        });
         outcome = "answered";
       } catch (error) {
         outcome = error instanceof CircuitOpenError ? "circuit_open" : "ai_failure";

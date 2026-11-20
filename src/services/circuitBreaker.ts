@@ -60,7 +60,8 @@ export function createCircuitBreaker(options: CircuitBreakerOptions = {}): Circu
     failureThreshold = 3,
     resetTimeoutMs = 30_000,
     timeoutMs = 5_000,
-    now = Date.now,
+    // Looked up on every call, so a replaced system clock is respected.
+    now = () => Date.now(),
   } = options;
 
   let state: CircuitState = "closed";

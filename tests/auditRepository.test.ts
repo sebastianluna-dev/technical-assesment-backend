@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -291,5 +291,97 @@ describe("audit repository: logging", () => {
     for (const spy of spies) {
       expect(spy).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("audit repository: storage failures", () => {
+  it("rejects when the path is a directory", async () => {
+    const repository = createAuditRepository(directory);
+
+    await expect(repository.findAll()).rejects.toMatchObject({ code: "EISDIR" });
+    await expect(repository.append(buildRecord(1))).rejects.toMatchObject({ code: "EISDIR" });
+    expect(await readdir(directory)).toEqual([]);
+  });
+
+  it("rejects when a parent of the path is a file", async () => {
+    const blocker = path.join(directory, "not-a-directory");
+    await writeFile(blocker, "keep me");
+    const repository = createAuditRepository(path.join(blocker, "audit-log.json"));
+
+    await expect(repository.append(buildRecord(1))).rejects.toThrow();
+    expect(await readFile(blocker, "utf8")).toBe("keep me");
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "keeps the existing file when the directory is not writable",
+    async () => {
+      const locked = path.join(directory, "locked");
+      const lockedFile = path.join(locked, "audit-log.json");
+      await mkdir(locked);
+      const repository = createAuditRepository(lockedFile);
+      await repository.append(buildRecord(1));
+      const before = await readFile(lockedFile, "utf8");
+
+      await chmod(locked, 0o500);
+      try {
+        await expect(repository.append(buildRecord(2))).rejects.toMatchObject({
+          code: "EACCES",
+        });
+        expect(await readFile(lockedFile, "utf8")).toBe(before);
+        expect(await readdir(locked)).toEqual(["audit-log.json"]);
+      } finally {
+        await chmod(locked, 0o700);
+      }
+
+      await repository.append(buildRecord(3));
+      expect((await repository.findAll()).map((r) => r.requestId)).toEqual(["req-1", "req-3"]);
+    },
+  );
+
+  it.skipIf(process.getuid?.() === 0)("rejects when the file is not readable", async () => {
+    const repository = createAuditRepository(filePath);
+    await repository.append(buildRecord(1));
+
+    await chmod(filePath, 0o000);
+    try {
+      await expect(repository.findAll()).rejects.toMatchObject({ code: "EACCES" });
+      await expect(repository.append(buildRecord(2))).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await chmod(filePath, 0o600);
+    }
+
+    expect(await repository.findAll()).toHaveLength(1);
+  });
+
+  it("fails only the writes that hit the failure when many run at once", async () => {
+    const repository = createAuditRepository(filePath);
+    const results = await Promise.allSettled([
+      repository.append(buildRecord(1)),
+      repository.append({ ...buildRecord(2), requestId: "" }),
+      repository.append(buildRecord(3)),
+      repository.append({ ...buildRecord(4), timestamp: "not a date" }),
+      repository.append(buildRecord(5)),
+    ]);
+
+    expect(results.map((r) => r.status)).toEqual([
+      "fulfilled",
+      "rejected",
+      "fulfilled",
+      "rejected",
+      "fulfilled",
+    ]);
+    expect((await repository.findAll()).map((r) => r.requestId)).toEqual([
+      "req-1",
+      "req-3",
+      "req-5",
+    ]);
+  });
+
+  it("keeps storage errors free of record contents", async () => {
+    const repository = createAuditRepository(directory);
+    const error = await repository.append(buildRecord(1)).catch((e: Error) => e);
+
+    expect(String((error as Error).message)).not.toContain("4111");
+    expect(String((error as Error).message)).not.toContain(key.toString("base64"));
   });
 });

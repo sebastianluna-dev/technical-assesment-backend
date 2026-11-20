@@ -10,7 +10,9 @@ import {
 } from "../../src/repositories/auditRepository.js";
 import { createCircuitBreaker } from "../../src/services/circuitBreaker.js";
 import { createEncryptionService } from "../../src/services/encryption.js";
+import type { EncryptionService } from "../../src/services/encryption.js";
 import type { AiClient } from "../../src/services/mockAiClient.js";
+import type { AuditRepository } from "../../src/repositories/auditRepository.js";
 
 export const FAILURE_THRESHOLD = 3;
 export const RESET_MS = 1000;
@@ -19,7 +21,16 @@ export const RESET_MS = 1000;
  * A real app on a temporary audit file, with a real breaker on a fake
  * clock, a stubbed AI client and a logger that records instead of printing.
  */
-export async function createTestApp() {
+export interface TestAppOverrides {
+  /** Replaces the file-backed repository, for example with one that fails. */
+  auditRepository?: AuditRepository;
+  /** Replaces the real encryption service. */
+  encryption?: EncryptionService;
+  /** Breaker call timeout in real milliseconds. */
+  timeoutMs?: number;
+}
+
+export async function createTestApp(overrides: TestAppOverrides = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "secure-inquiry-"));
   const auditFile = path.join(directory, "audit-log.json");
 
@@ -31,6 +42,7 @@ export async function createTestApp() {
   const circuitBreaker = createCircuitBreaker({
     failureThreshold: FAILURE_THRESHOLD,
     resetTimeoutMs: RESET_MS,
+    timeoutMs: overrides.timeoutMs,
     now: () => time,
   });
 
@@ -40,8 +52,8 @@ export async function createTestApp() {
   const app = createApp({
     aiClient: { generateAnswer },
     circuitBreaker,
-    encryption,
-    auditRepository,
+    encryption: overrides.encryption ?? encryption,
+    auditRepository: overrides.auditRepository ?? auditRepository,
     logger,
   });
 

@@ -60,7 +60,7 @@ curl -X POST http://localhost:3000/secure-inquiry \
   -d '{"userId":"user-1","message":"My card is 4111 1111 1111 1111"}'
 ```
 
-- The body must be JSON (`Content-Type: application/json`, at most 64 KB) with exactly two strings: `userId` (up to 100 characters) and `message` (up to 10,000). Blank values are rejected; values are never trimmed.
+- The body must be JSON (`Content-Type: application/json`, at most 64 KB) with exactly two strings: `userId` (up to 100 characters) and `message` (up to 10,000). Blank values and text that is not valid Unicode are rejected; values are never trimmed.
 - The message is redacted, the redacted text goes to the mock AI through a circuit breaker, and an audit record is stored before the response is sent. The record keeps the original message encrypted and the redacted one as text.
 - Errors: `400` invalid body or malformed JSON, `413` body too large, `415` wrong content type, `500` if the audit record cannot be stored. Error bodies never include request contents or stack traces.
 - The circuit opens after 3 consecutive AI failures and allows a trial call after 30 seconds. Set `MOCK_AI_FAILURE_RATE=1` to see the `503` path.
@@ -74,6 +74,10 @@ curl -X POST http://localhost:3000/secure-inquiry \
 - `createEncryptionService(key)` in `src/services/encryption.ts` encrypts with AES-256-GCM: a fresh random 12-byte IV per call and a 16-byte tag, returned with the ciphertext as base64. Decryption fails on any modified field.
 - `createAuditRepository(filePath)` in `src/repositories/auditRepository.ts` appends records to a JSON file. The original message is stored encrypted and the redacted message as text. Writes are serialized and replace the file atomically; a corrupted file raises an error and is left untouched.
 - Both are used by `POST /secure-inquiry`. Writes from several processes to the same file are not coordinated.
+
+## Tests
+
+`npm test` runs 367 tests in about two seconds. Unit tests that depend on time use fake timers; HTTP tests run `createApp()` through Supertest with injected dependencies and a temporary audit file. All data is synthetic, and no test reads `.env` or writes to `data/`. See decision 45 in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Layout
 

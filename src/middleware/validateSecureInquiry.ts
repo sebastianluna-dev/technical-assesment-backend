@@ -17,6 +17,13 @@ const FIELDS = [
   ["message", MESSAGE_MAX_LENGTH],
 ] as const;
 
+/**
+ * Whitespace plus the zero-width characters that `trim()` keeps (zero-width
+ * space, non-joiner, joiner and word joiner). A value made only of these
+ * shows nothing on screen, so it counts as blank.
+ */
+const INVISIBLE_ONLY = /^[\s\u200B-\u200D\u2060]*$/;
+
 /** Length in Unicode code points, so an emoji counts as one character. */
 function characterCount(value: string): number {
   return Array.from(value).length;
@@ -44,8 +51,12 @@ export function validateSecureInquiryBody(body: unknown): ValidationResult {
       errors.push(`${field} is required`);
     } else if (typeof value !== "string") {
       errors.push(`${field} must be a string`);
-    } else if (value.trim() === "") {
+    } else if (INVISIBLE_ONLY.test(value)) {
       errors.push(`${field} must not be blank`);
+    } else if (!value.isWellFormed()) {
+      // A lone surrogate cannot be encoded as UTF-8: it would be replaced
+      // during encryption and the stored original would no longer match.
+      errors.push(`${field} must be valid Unicode text`);
     } else if (characterCount(value) > maxLength) {
       errors.push(`${field} must be at most ${maxLength} characters`);
     }

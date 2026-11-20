@@ -38,6 +38,14 @@ export function createErrorHandler(logger: Logger): ErrorRequestHandler {
       return;
     }
 
+    // Other client errors raised while reading the body, such as a corrupt
+    // compressed stream: they carry a 4xx status but no known type.
+    const status = (error as { status?: unknown } | null)?.status;
+    if (typeof status === "number" && Number.isInteger(status) && status >= 400 && status < 500) {
+      res.status(status).json({ error: "Invalid request body" });
+      return;
+    }
+
     if (error instanceof AuditFailureError) {
       // Already logged where it happened, with its request id.
       res.set("X-Request-Id", error.requestId);

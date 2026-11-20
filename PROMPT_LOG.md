@@ -248,3 +248,56 @@ Entries are added after each task. Dates are local machine dates.
 - Compressed request bodies (`Content-Encoding: gzip`) and charsets other than UTF-8.
 - No linter or formatter is configured, so none was run.
 - Nothing was pushed. The repository has no remote.
+
+---
+
+## 5. Complete the test suite
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Complete the test suite with Vitest and Supertest. Cover invalid requests, all redaction types together, repeated matches, numeric boundaries, overlapping matches and adversarial inputs. Verify that only redacted text reaches the mock and that the original survives an encryption/decryption round trip unchanged. Test tampering, missing keys, concurrent audit writes and storage failures. Verify that three consecutive failures open the circuit, the fourth call never invokes the mock, a success resets the counter, and half-open recovery permits only one probe. Use fake timers for time-dependent unit tests and injected dependencies for HTTP tests. Use temporary audit files and synthetic data, then run and fix the full suite.
+
+**Outcome:**
+
+- The suite went from 204 to 367 tests in 10 files.
+- New files: `tests/validation.test.ts` (31), `tests/secureInquiryService.test.ts` (22, fake repository and encryption, fake timers) and `tests/mockAiClient.test.ts` (5, fake timers).
+- `tests/circuitBreaker.test.ts` was rewritten on Vitest fake timers with the default 3 failures, 30 s and 5 s (23 tests). It names the four requested behaviours: three consecutive failures open the circuit, the fourth call does not invoke the operation, a success resets the counter, and half-open permits one probe.
+- `tests/redaction.test.ts` (99): added a table for runs of 8 to 21 digits, grouped digits at 12/13/19, repeated and mixed values, user-typed tokens, malformed emails, look-alike characters, regex metacharacters, nine 100,000-character inputs with a time bound, and 5,000 generated inputs checked for idempotency.
+- `tests/secureInquiry.test.ts` (94): added end-to-end redaction cases that compare the mock's argument, the audit text and the decrypted original; the breaker sequence through HTTP, including a single probe with three concurrent requests rejected; 60 parallel requests; adversarial requests (lone surrogates, zero-width text, deep nesting, 5,000 properties, prototype keys, gzip bomb, corrupt gzip, unsupported charset, other methods); and injected repository and encryption failures.
+- `tests/auditRepository.test.ts` (35): added storage failures on the real filesystem (path is a directory, parent is a file, read-only directory, unreadable file).
+- `tests/encryption.test.ts` (28): added missing keys.
+- `tests/helpers/testApp.ts` accepts an injected repository, encryption service and timeout.
+
+**First full run: 17 failures.** Fourteen came from four defects in the code, all fixed (decision 46):
+
+1. Messages with a lone surrogate were accepted and did not survive the round trip. Now rejected with 400.
+2. Values made only of zero-width characters passed as non-blank. Now rejected with 400.
+3. An AI client resolving with a non-string or empty answer produced a 200 without an answer. Now a 503, audited and counted by the breaker.
+4. A corrupt gzip body returned 500. Now 400 `{"error":"Invalid request body"}`. This one was found while fixing a test, not by the first run.
+
+Three failures were wrong expectations in new tests: two redaction cases that describe documented behaviour, and one test that sent gzip bytes through Supertest's JSON serializer. They were corrected; the two redaction behaviours were added to `docs/REDACTION.md`.
+
+- Source files changed: `src/middleware/validateSecureInquiry.ts`, `src/services/secureInquiry.ts`, `src/middleware/errorHandler.ts`, and `src/services/circuitBreaker.ts` (the default clock now reads `Date.now()` on each call).
+- Added decisions 45 and 46 and edited decisions 38, 39, 40 and 42.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 10 test files, 367 tests, all passed |
+| `npm test` five more times in a row | 367 passed each time, about 1.6 s per run |
+| `npm run build` | Passed |
+| `grep` for `process.env` and `.env` in `tests/` | No matches |
+| `ls data` after the runs | The folder does not exist: no test wrote outside its temporary directory |
+
+**Not checked:**
+
+- Code coverage was not measured; no coverage tool is installed.
+- The read-only directory and unreadable file tests are skipped when run as root, and file permission behaviour was only run on macOS.
+- Two processes writing the same audit file, and crashes in the middle of a write, are still untested.
+- The built server was not started again after these changes; the changes were exercised through Supertest only.
+- No linter or formatter is configured, so none was run.
+- Nothing was pushed. The repository has no remote.
