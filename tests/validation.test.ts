@@ -3,7 +3,7 @@ import {
   MESSAGE_MAX_LENGTH,
   USER_ID_MAX_LENGTH,
   validateSecureInquiryBody,
-} from "../src/middleware/validateSecureInquiry.js";
+} from "../src/validation/secureInquiry.js";
 
 const valid = { userId: "user-1", message: "hello" };
 

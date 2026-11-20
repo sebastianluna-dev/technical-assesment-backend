@@ -4,6 +4,7 @@ import {
   type AuditRepository,
 } from "../repositories/auditRepository.js";
 import type { Logger } from "../utils/logger.js";
+import type { SecureInquiryInput } from "../validation/secureInquiry.js";
 import { CircuitOpenError, type CircuitBreaker } from "./circuitBreaker.js";
 import type { EncryptionService } from "./encryption.js";
 import type { AiClient } from "./mockAiClient.js";
@@ -55,7 +56,7 @@ export interface SecureInquiryDependencies {
 
 export interface SecureInquiryService {
   /** Expects input that already passed validation. */
-  handle(input: { userId: string; message: string }): Promise<SecureInquiryResult>;
+  handle(input: SecureInquiryInput): Promise<SecureInquiryResult>;
 }
 
 function errorName(error: unknown): string {

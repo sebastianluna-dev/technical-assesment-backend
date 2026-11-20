@@ -441,7 +441,8 @@ src/
   server.ts         reads the environment and starts the HTTP server
   config/           environment loading and validation
   routes/           /health and /secure-inquiry
-  middleware/       content type check, validation, 404 and error handler
+  middleware/       content type check, 404 and error handler
+  validation/       pure validation of the /secure-inquiry body
   services/         redaction, encryption, circuit breaker, mock AI, inquiry flow
   repositories/     JSON file audit log
   utils/            strict base64 decoding, logger

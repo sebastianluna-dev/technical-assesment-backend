@@ -535,3 +535,36 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 - The defect was reproduced in unit tests with fake timers only, not on a running server. Reaching it there needs `CIRCUIT_RESET_MS` below the 5-second call timeout and a mock slower than the open period.
 - The Docker image was not rebuilt.
 - Nothing was pushed.
+
+---
+
+## 12. Call validation directly from the route handler
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Simplify validation for /secure-inquiry. Move the pure validation function to validation/secureInquiry.ts and call it directly from the route handler. After checking result.ok, pass result.value to the service and remove the handoff through res.locals.inquiry. Keep a single definition of SecureInquiryInput, preserve the current validation rules and responses, and update affected imports and tests. Avoid adding another controller layer.
+
+**Outcome:**
+
+- `src/middleware/validateSecureInquiry.ts` was moved to `src/validation/secureInquiry.ts` (a Git rename) and its Express middleware removed. The file now has no Express import: constants, `SecureInquiryInput`, `ValidationResult` and `validateSecureInquiryBody`, unchanged.
+- `src/routes/secureInquiry.ts`: the handler calls `validateSecureInquiryBody(req.body)`, answers 400 with the same body when `ok` is false, and passes `value` to the service. `res.locals` is no longer used anywhere.
+- `src/services/secureInquiry.ts`: `handle` takes `SecureInquiryInput` imported from the validation module instead of an inline copy of the shape.
+- `tests/validation.test.ts`: import path updated. No test logic changed.
+- README project layout updated; decision 56 added.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 10 test files, 413 tests, all passed; the validation and HTTP tests (400 responses, 415, body limit, no side effects on invalid requests) are unchanged |
+| Search for `res.locals` and the removed middleware name in `src` and `tests` | No matches |
+| `npm run build` | Passed |
+| `npm run demo` | All 16 checks passed |
+
+**Not checked:**
+
+- The Docker image was not rebuilt.
+- Nothing was pushed.

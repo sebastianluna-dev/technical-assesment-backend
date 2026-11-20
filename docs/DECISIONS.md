@@ -345,3 +345,13 @@ A stricter alternative, requiring the same separator throughout a number, would 
 - The single trial is preserved: half-open admits one call, and only a call started in that half-open cycle can close or reopen the circuit.
 - A counter was preferred to comparing timestamps (two changes can share a millisecond, and tests replace the clock) and to cancelling pending calls (the operation is an opaque promise that cannot be cancelled).
 - The open check is unchanged: an open circuit rejects before invoking the operation.
+
+## 56. Validation is a pure function called by the route handler
+
+The `/secure-inquiry` body was validated by a middleware that stored the result in `res.locals.inquiry`, and the handler read it back with a type cast. The pure function now lives in `src/validation/secureInquiry.ts` and the handler calls it directly: if `result.ok` is false it answers 400, otherwise it passes `result.value` to the service.
+
+- The cast is gone. The value reaches the service with the type the validator returned, checked by the compiler.
+- `SecureInquiryInput` is defined once, in the validation module. The service's `handle` used an equivalent inline type and now imports this one.
+- The route's order is unchanged: `requireJson` (415), the JSON parser with its 64 KB limit, validation (400), service. This updates the description in decision 37 of the route's four steps: the third is no longer a middleware.
+- `requireJson` and the error handler stay in `src/middleware` because they are real Express middleware. No controller layer was added; the handler is still the function in `src/routes/secureInquiry.ts`.
+- Rules, error texts and the 400 response body are the same; the validation and HTTP tests pass without changes other than one import path.

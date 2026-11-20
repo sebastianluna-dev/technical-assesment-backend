@@ -1,8 +1,7 @@
-import type { RequestHandler } from "express";
-
 export const USER_ID_MAX_LENGTH = 100;
 export const MESSAGE_MAX_LENGTH = 10_000;
 
+/** A validated request body. The only definition of this shape. */
 export interface SecureInquiryInput {
   userId: string;
   message: string;
@@ -75,14 +74,3 @@ export function validateSecureInquiryBody(body: unknown): ValidationResult {
     value: { userId: record.userId as string, message: record.message as string },
   };
 }
-
-/** Responds 400 on an invalid body; otherwise stores it in `res.locals.inquiry`. */
-export const validateSecureInquiry: RequestHandler = (req, res, next) => {
-  const result = validateSecureInquiryBody(req.body);
-  if (!result.ok) {
-    res.status(400).json({ error: "Invalid request", details: result.errors });
-    return;
-  }
-  res.locals.inquiry = result.value;
-  next();
-};
