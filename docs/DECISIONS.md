@@ -260,3 +260,27 @@ Writing the adversarial tests exposed four defects in the code, each fixed with 
 4. **A corrupt gzip body returned 500.** The parser's error had a 400 status but no known type, so it fell through to the generic handler and was logged as unexpected. Client errors with a 4xx status now return that status with a fixed text.
 
 Three new tests failed because their expectations were wrong, not the code: two redaction cases that hit documented behaviour (digits after a card are absorbed; short numbers in a row add up to a card candidate) and one that sent gzip bytes through Supertest's JSON serializer. The redaction cases were kept as tests of the documented behaviour and added to `docs/REDACTION.md`.
+
+## 47. Docker image: two stages, no key, unprivileged user
+
+The `Dockerfile` compiles in a build stage and copies only `dist`, production dependencies and `package.json` into the runtime stage (`node:24-alpine`). It runs as the `node` user, declares `/app/data` as a volume for the audit file, and has a health check that calls `/health`.
+
+`ENCRYPTION_KEY` is not set in the image and `.dockerignore` keeps `.env` and `data/` out of the build context, so neither the key nor audit data can end up in a layer. The key is given at `docker run` time. The container starts `node dist/server.js` directly, without npm, so `SIGTERM` reaches the process and `docker stop` shuts it down cleanly.
+
+`compose.yaml` publishes the port on `127.0.0.1` only and takes the host port from `HOST_PORT` (default 3000), because 3000 is a common port and was already in use on the development machine.
+
+## 48. The lockfile was regenerated for clean installs
+
+`npm ci` failed inside the image: the lockfile written by the local npm 11.6.2 lacked two optional packages (`@emnapi/core`, `@emnapi/runtime`) that npm 11.19.1 in `node:24-alpine` requires to be listed. Deleting `node_modules` and `package-lock.json` and running `npm install` again produced a lockfile that both versions accept. The direct dependency versions did not change.
+
+## 49. `MOCK_AI_DELAY_MS`
+
+The mock already supported a delay; the setting exposes it (default 0) so the difference between a request that waits for the AI and one rejected by an open circuit can be seen with `curl` on the real server.
+
+## 50. The demo runs the real app in its own process with a controllable mock
+
+`scripts/demo.ts` calls `createApp()` with the real encryption service, audit repository and circuit breaker, listens on a free port and sends requests with `fetch`. Only the AI client differs: it is the real mock wrapped with a switch, so the script can make it fail, then recover.
+
+A demo driving `npm start` from outside was rejected because the server has no way to change the mock's behaviour while running, and adding one (a magic word in the message, a control endpoint) would put a test hook in production code. Restarting the server to change the failure rate also resets the breaker, so it could not show recovery.
+
+The script generates its own key, writes to a temporary directory it deletes, uses only synthetic data, checks every step and exits with code 1 if a check fails. Its open period is 3 seconds instead of 30 so the recovery step is short.

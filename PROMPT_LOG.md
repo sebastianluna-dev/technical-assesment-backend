@@ -301,3 +301,60 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 - The built server was not started again after these changes; the changes were exercised through Supertest only.
 - No linter or formatter is configured, so none was run.
 - Nothing was pushed. The repository has no remote.
+
+---
+
+## 6. README, Docker and demo script
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Finish the README with setup instructions, safe key generation, configuration, request and response examples, tests and Docker commands. Explain the sanitizer’s limits, the process-local circuit breaker, the single-process JSON storage and that userId is an identifier rather than authentication. Create a demo script using synthetic data that shows successful redaction, the encrypted audit record, three consecutive failures and the fourth request returning immediately without the AI delay. Print request durations and explain how to demonstrate recovery.
+
+**Outcome:**
+
+### Step 1: Docker
+
+- The project had no Docker files, so the commands in the README needed them. Added `Dockerfile` (two stages, `node:24-alpine`, runs as `node`, volume at `/app/data`, health check), `.dockerignore` (excludes `.env`, `data/`, tests, docs) and `compose.yaml`.
+- The first image build failed at `npm ci`: the lockfile was missing two optional packages required by the npm version in the image. `package-lock.json` was regenerated from scratch; direct dependency versions are unchanged (decision 48).
+- Port 3000 on the development machine was in use by another Node process, so the first Compose check reached that process instead. `compose.yaml` now takes the host port from `HOST_PORT`, and the check was repeated on a free port.
+
+### Step 2: demo script
+
+- Added `MOCK_AI_DELAY_MS` (default 0) to the configuration, `.env.example` and the env tests (2 new tests, 369 in total).
+- Added `scripts/demo.ts` and the `npm run demo` script; `tsconfig.json` now type-checks `scripts`.
+- The demo starts the real app on a free port with a generated key and a temporary audit file, and shows: a redacted successful request, the stored record and its decryption, three failing requests, a fourth answered without calling the mock, and recovery through one probe after a 3-second open period. It prints each request's duration, a summary table and the result of 16 checks, and exits with code 1 if any fails.
+
+### Step 3: README
+
+- Rewrote `README.md`: quick start, scripts, configuration, safe key handling, API with request and response examples and the error table, demo, manual circuit-breaker walkthrough, how to show recovery, tests, Docker commands, and a section on limits (sanitizer, process-local breaker, single-process JSON storage, `userId` is not authentication).
+- Added decisions 47 to 50.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 10 test files, 369 tests, all passed |
+| `npm run demo` (run three times) | All 16 checks passed each time; open-circuit requests took 4 to 9 ms against about 610 ms for requests that reached the mock |
+| `npm ci` with the regenerated lockfile | Passed, 0 vulnerabilities |
+| `docker build` | Passed; image is 242 MB |
+| `docker run` with no key | "Configuration error: Missing ENCRYPTION_KEY…", exit code 1 |
+| `docker run` with a key and a volume: `/health`, one request, `whoami`, audit file | 200, 200, `node`, file mode `0600` with redacted text and no card digits |
+| Container restart, then another request | 2 records: the volume kept the first |
+| Container health and `docker stop` | `healthy`; exit code 0 with "SIGTERM received, closing server" |
+| `docker history` searched for `ENCRYPTION_KEY=` | 0 matches |
+| The README's `docker run` command with `--env-file .env`, on port 3483 | 200 and one record with outcome `answered` |
+| `HOST_PORT=3482 docker compose up`, `/health`, one request, `docker compose down -v` | 200, 200, record present, removed |
+| README manual walkthrough on the built server (`MOCK_AI_FAILURE_RATE=1 MOCK_AI_DELAY_MS=600 CIRCUIT_RESET_MS=5000`) | Three 503 in about 0.61 s, fourth 503 in 0.005 s; after 5 s the probe took 0.61 s and the next request 0.005 s |
+| README validation example | 400 with the three `details` shown |
+
+**Not checked:**
+
+- `docker compose up` on the default port 3000, because that port was in use on this machine.
+- The image on any platform other than this machine's architecture.
+- The `openssl rand -base64 32` key was checked for length only (44 characters); the server was not started with one.
+- The README's response examples for the success case reuse output captured in entry 4; the request id, timestamp and ciphertext differ on every run.
+- No linter or formatter is configured, so none was run.
+- Nothing was pushed. The repository has no remote.
