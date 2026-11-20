@@ -84,7 +84,7 @@ Settings are read from environment variables. `npm run dev` and `npm start` also
 | `CIRCUIT_FAILURE_THRESHOLD` | No | `3` | Consecutive AI failures that open the circuit |
 | `CIRCUIT_RESET_MS` | No | `30000` | Time the circuit stays open before one probe request |
 | `MOCK_AI_FAILURE_RATE` | No | `0` | Probability, from 0 to 1, that the mock AI fails |
-| `MOCK_AI_DELAY_MS` | No | `0` | Simulated latency of the mock AI |
+| `MOCK_AI_DELAY_MS` | No | `2000` | Simulated latency of the mock AI in milliseconds. `0` answers at once |
 
 Invalid values stop the server at startup with a message that names the variable.
 
@@ -143,6 +143,8 @@ X-Request-Id: 8d4b072a-678d-430f-8c05-29ac9a365cf7
 
 {"answer":"Generated Answer"}
 ```
+
+The response arrives after about two seconds: the mock AI waits `MOCK_AI_DELAY_MS` (2,000 ms by default) before it answers or fails. A request rejected by an open circuit does not wait.
 
 The AI received `My card is <REDACTED: CREDIT_CARD> and my email is <REDACTED: EMAIL>`, and this record was added to the audit file before the response was sent:
 
@@ -297,7 +299,7 @@ npm test
 npm run typecheck
 ```
 
-405 tests in 10 files, about two seconds.
+409 tests in 10 files, about two seconds.
 
 | File | Covers |
 | --- | --- |

@@ -5,10 +5,16 @@ export interface AiClient {
 
 export const MOCK_ANSWER = "Generated Answer";
 
+/**
+ * Latency of a call when none is configured. The single source of this
+ * default: the environment loader uses the same constant.
+ */
+export const DEFAULT_MOCK_AI_DELAY_MS = 2_000;
+
 export interface MockAiClientOptions {
   /** Probability from 0 to 1 that a call fails. Default 0. */
   failureRate?: number;
-  /** Simulated latency in milliseconds. Default 0. */
+  /** Simulated latency in milliseconds. Default 2,000; pass 0 for no wait. */
   delayMs?: number;
   /** Random source, replaceable in tests. */
   random?: () => number;
@@ -19,7 +25,7 @@ export interface MockAiClientOptions {
  * logs it, and returns a fixed answer or fails at the configured rate.
  */
 export function createMockAiClient(options: MockAiClientOptions = {}): AiClient {
-  const { failureRate = 0, delayMs = 0, random = Math.random } = options;
+  const { failureRate = 0, delayMs = DEFAULT_MOCK_AI_DELAY_MS, random = Math.random } = options;
 
   return {
     async generateAnswer(_prompt) {

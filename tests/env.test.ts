@@ -15,7 +15,7 @@ describe("loadEnv", () => {
       circuitFailureThreshold: 3,
       circuitResetMs: 30_000,
       mockAiFailureRate: 0,
-      mockAiDelayMs: 0,
+      mockAiDelayMs: 2_000,
     });
   });
 
@@ -58,6 +58,12 @@ describe("loadEnv: circuit breaker and mock AI", () => {
     expect(env.circuitResetMs).toBe(1000);
     expect(env.mockAiFailureRate).toBe(0.25);
     expect(env.mockAiDelayMs).toBe(750);
+  });
+
+  it("defaults the mock delay to two seconds and accepts an explicit 0", () => {
+    expect(loadEnv({ ENCRYPTION_KEY }).mockAiDelayMs).toBe(2_000);
+    expect(loadEnv({ ENCRYPTION_KEY, MOCK_AI_DELAY_MS: "" }).mockAiDelayMs).toBe(2_000);
+    expect(loadEnv({ ENCRYPTION_KEY, MOCK_AI_DELAY_MS: "0" }).mockAiDelayMs).toBe(0);
   });
 
   it.each([

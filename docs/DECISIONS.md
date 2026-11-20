@@ -324,3 +324,13 @@ Cards and SSNs used to accept one space, one no-break space or one hyphen betwee
 Known costs, all documented: two values with only separators between them share one token and may be labelled as a card (two SSNs joined by ` / `); a date followed by a time and an IP address with a port are now redacted. The Unicode emails and full-width digits asked for in the same prompt were already in place (decision 52).
 
 A stricter alternative, requiring the same separator throughout a number, would avoid most merges. It was rejected because it stops detecting cards with mixed separators (`4111 1111-1111 1111`), which were detected before: a missed card is worse than a merged token.
+
+## 54. The mock AI waits 2,000 ms by default
+
+`createMockAiClient` and `MOCK_AI_DELAY_MS` both defaulted to 0. Both now default to 2,000 ms, from one exported constant (`DEFAULT_MOCK_AI_DELAY_MS` in `src/services/mockAiClient.ts`) that `src/config/env.ts` imports, so the two cannot drift apart. This replaces the default stated in decision 49.
+
+- The delay comes before the failure draw, so a failing call also takes two seconds. A request rejected by an open circuit never reaches the mock and does not wait.
+- Two seconds is under the circuit breaker's 5-second timeout, so the default delay does not count as a failure.
+- `0` remains a valid value in both places and skips the timer entirely. Unit tests of the mock pass `delayMs: 0` unless they are measuring the delay; HTTP tests inject their own AI client and never used the mock's delay.
+- `failureRate` and the injectable `random` are unchanged, so failures stay deterministic in tests.
+- The demo script keeps its own explicit 600 ms (`DEMO_AI_DELAY_MS`); with 2,000 ms its five calls that reach the mock would take ten seconds.

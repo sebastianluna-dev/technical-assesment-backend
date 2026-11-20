@@ -1,3 +1,4 @@
+import { DEFAULT_MOCK_AI_DELAY_MS } from "../services/mockAiClient.js";
 import { decodeBase64 } from "../utils/base64.js";
 
 export type NodeEnv = "development" | "test" | "production";
@@ -15,7 +16,7 @@ export interface Env {
   circuitResetMs: number;
   /** Probability (0 to 1) that the mock AI call fails. */
   mockAiFailureRate: number;
-  /** Simulated latency of the mock AI call, in milliseconds. */
+  /** Simulated latency of the mock AI call, in milliseconds. Default 2,000. */
   mockAiDelayMs: number;
 }
 
@@ -114,7 +115,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const mockAiDelayMs = parseNumber(
     "MOCK_AI_DELAY_MS",
     source.MOCK_AI_DELAY_MS,
-    0,
+    DEFAULT_MOCK_AI_DELAY_MS,
     (value) => Number.isInteger(value) && value >= 0,
     "an integer of 0 or more",
   );

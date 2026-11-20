@@ -465,3 +465,38 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 - Two values with only separators between them share one token; two SSNs joined by ` / ` are labelled as a card. Both values are hidden.
 - The Docker image was not rebuilt.
 - Nothing was pushed.
+
+---
+
+## 10. Two-second default delay for the mock AI
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Make the mock AI call wait two seconds by default. Review src/config/env.ts and src/services/mockAiClient.ts, since both currently default to zero. Use a consistent default of 2,000 ms while allowing tests to explicitly configure zero when appropriate. Verify the delay with Vitest fake timers and preserve the ability to configure deterministic failures.
+
+**Outcome:**
+
+- `src/services/mockAiClient.ts` exports `DEFAULT_MOCK_AI_DELAY_MS = 2_000` and uses it when `delayMs` is not given. `src/config/env.ts` imports the same constant as the default of `MOCK_AI_DELAY_MS`.
+- `0` is still accepted by both and means no wait. `failureRate` and `random` are unchanged.
+- `tests/mockAiClient.test.ts`: 3 new tests with fake timers (the answer arrives at 2,000 ms and not at 1,999; a failure at rate 1 is also thrown at 2,000 ms and not before; `delayMs: 0` answers with no timer pending). The tests that are not about the delay now pass `delayMs: 0` explicitly.
+- `tests/env.test.ts`: the defaults test expects 2,000, and 1 new test checks the default, an empty value and an explicit `0`.
+- `.env.example` and the README configuration table show 2,000; the README notes that the success example takes about two seconds. Decision 54 added. README test count updated to 409.
+- The demo script was not changed: it sets its own delay (600 ms).
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 10 test files, 409 tests, all passed in 1.8 s (no test waits two real seconds) |
+| `npm run demo` | All 16 checks passed |
+| Built server with no `MOCK_AI_DELAY_MS` set, one `POST /secure-inquiry` | HTTP 200 in 2.017 s |
+| Same server, `GET /health` | HTTP 200 in 0.001 s |
+
+**Not checked:**
+
+- The Docker image was not rebuilt, so the two-second default was not timed in a container.
+- The README's manual circuit-breaker walkthrough was not rerun; it sets `MOCK_AI_DELAY_MS=600` explicitly and is not affected by the default.
+- Nothing was pushed.
