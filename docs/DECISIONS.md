@@ -50,9 +50,9 @@ The endpoint is a liveness check: it reports that the process answers HTTP. It h
 
 `server.ts` closes the HTTP server on `SIGTERM` and `SIGINT` and then exits with code 0, so in-flight requests finish when the process is stopped by a container runtime or by Ctrl+C.
 
-## 13. No error or 404 middleware yet
+## 13. No error or 404 middleware yet (changed by decision 42)
 
-The request asked for `GET /health` only, so unknown paths get Express's default 404. JSON error and not-found handlers belong in `src/middleware` once real endpoints define the error format.
+At first unknown paths got Express's default 404, because only `GET /health` existed. JSON not-found and error handlers were added with `POST /secure-inquiry`.
 
 ## 14. `x-powered-by` is disabled
 
@@ -124,7 +124,7 @@ The ciphertext is not bound to its audit record (for example by using `requestId
 
 The repository receives the original message already encrypted. It has no access to the key and never sees the original text, so it cannot write or log it. It copies only the six known fields to disk, so an extra property on the object passed in is dropped.
 
-`outcome` is any non-empty string for now. The allowed values will be fixed when an endpoint defines them.
+The repository accepts any non-empty string as `outcome`. The values in use are defined by the service that writes them (decision 40).
 
 ## 29. Writes are serialized with one queue per file
 
@@ -169,3 +169,66 @@ The request for `POST /secure-inquiry` refers to "the mock" and "the circuit bre
 A call that takes more than 5 seconds is a failure (`CircuitTimeoutError`); the slow operation itself is not cancelled, only abandoned. The breaker counts only what happens inside the function it is given, which is how validation and storage errors stay out of the count: they never run inside it.
 
 State is in memory and per process. It resets on restart and is not shared between instances.
+
+## 36. `createApp()` receives its dependencies
+
+`createApp({ aiClient, circuitBreaker, encryption, auditRepository, logger })` builds the routes from what it is given. `server.ts` creates the real ones from the environment. Tests pass a temporary audit file, a breaker on a fake clock, a stubbed AI client and a recording logger, so every path of the endpoint is exercised through HTTP without touching `process.env` or `data/`.
+
+## 37. Request pipeline for `POST /secure-inquiry`
+
+The route runs four steps in order: `requireJson` (415), the JSON parser with a 64 KB limit, `validateSecureInquiry` (400), then the service. The content type is checked before the body is read, and the parser is mounted on this route only.
+
+The service (`src/services/secureInquiry.ts`) then does: redact, call the AI through the breaker, encrypt and append the audit record, and only then return the result. The response is written after the append has finished, so a client never receives an answer that was not audited.
+
+## 38. Validation rules
+
+- The body must be a JSON object with exactly `userId` and `message`; any other property is rejected rather than ignored.
+- Both must be strings. A value that is empty or only whitespace is rejected.
+- Values are never trimmed or normalized. Blank detection uses a trimmed copy; the stored and processed value is the string as sent, including leading and trailing whitespace.
+- Limits are 100 and 10,000 characters counted as Unicode code points, so an emoji or an accented letter is one character. The 64 KB limit is on bytes of the raw body and is enforced by the parser (413).
+- All problems are reported together in `details`.
+
+`userId` is not checked against any user store and there is no authentication: the endpoint trusts the value it receives.
+
+Not detectable: duplicate keys in the JSON text. The parser keeps the last one.
+
+## 39. Error responses contain fixed texts only
+
+| Status | Body | When |
+| --- | --- | --- |
+| 400 | `{"error":"Invalid request","details":[...]}` | Validation failed |
+| 400 | `{"error":"Malformed JSON"}` | Body is not a JSON object or array |
+| 413 | `{"error":"Request body too large"}` | Body over 64 KB |
+| 415 | `{"error":"Content-Type must be application/json"}` | Other or missing content type |
+| 404 | `{"error":"Not Found"}` | Unknown route or method |
+| 500 | `{"error":"Internal Server Error"}` | Audit failure or any unexpected error |
+
+`details` entries are built from field names and rules. They never contain a value, and an unexpected property is reported as "Only userId and message are allowed" without its name, since the name is also request content. The 404 does not repeat the path. The error handler never sends an error's message or stack; Express's default handler would send the stack outside production, which is why a custom one is required.
+
+## 40. Outcomes and status codes
+
+| Outcome in the audit record | Response |
+| --- | --- |
+| `answered` | 200 `{"answer":"Generated Answer"}` (the text returned by the AI client) |
+| `ai_failure` (the call failed or timed out) | 503 `{"answer":"Service Busy"}` |
+| `circuit_open` (the call was not attempted) | 503 `{"answer":"Service Busy"}` |
+
+The two fallback cases look the same to the client and are told apart in the audit record. Requests rejected by validation are not audited: they are not valid requests, and auditing them would store unvalidated input.
+
+## 41. Audit failure wins over any answer
+
+If encrypting or appending the record fails, the response is the generic 500, whether the AI answered or not. The answer is discarded. The failure is logged with the request id, the outcome, the error class and, for a corrupted file, the reason; the original error stays in `cause` and is not sent.
+
+The AI call happens before the audit write, so a failed audit means an AI call was made for a request that has no record. Auditing first would avoid that but could not record the outcome without a second write.
+
+## 42. What the breaker counts
+
+Only the function passed to `circuitBreaker.execute` is counted, and that function contains only `aiClient.generateAnswer(redactedMessage)`. Content-type, parsing and validation errors return before the service runs. Redaction runs before the breaker and encryption and storage after it. Tests send invalid requests and force storage failures and assert the circuit stays closed.
+
+## 43. Logging is structured and limited to identifiers
+
+`src/utils/logger.ts` writes one JSON line per event with a fixed event name and a few fields: request id, outcome, error class name, error code. Error messages from unknown errors are not logged, because a provider or parser error can quote its input. Two events exist: `ai_unavailable` (warn) and `audit_failed` (error), plus `unhandled_error` from the error handler. Successful requests are not logged; the audit file is their record.
+
+## 44. `X-Request-Id` response header
+
+Responses that reached the service (200, 503 and audit-failure 500) carry the generated request id, which is the `requestId` of the audit record and of the log line. It was not requested; it lets a client report a problem without anyone needing the message contents. Incoming `X-Request-Id` headers are ignored.

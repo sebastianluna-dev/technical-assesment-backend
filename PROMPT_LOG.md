@@ -214,3 +214,37 @@ Entries are added after each task. Dates are local machine dates.
 | --- | --- |
 | `npm run typecheck` | Passed, no errors |
 | `npm test` | 6 test files, 154 tests, all passed |
+
+### Step 2: the endpoint
+
+- Added `POST /secure-inquiry` in `src/routes/secureInquiry.ts`, with the flow in `src/services/secureInquiry.ts`: redact, call the AI client through the breaker with the redacted text, encrypt the original, append the audit record, then respond.
+- Added `src/middleware/requireJson.ts` (415), `src/middleware/validateSecureInquiry.ts` (400) and `src/middleware/errorHandler.ts` (JSON 404 and a final error handler with fixed texts). The JSON parser is limited to 64 KB on this route.
+- Responses: 200 `{"answer":"Generated Answer"}`; 503 `{"answer":"Service Busy"}` for an AI failure, a timeout or an open circuit; 500 `{"error":"Internal Server Error"}` when the audit record cannot be stored.
+- Audit outcomes: `answered`, `ai_failure`, `circuit_open`. Requests that fail validation are not audited.
+- `createApp()` now takes its dependencies as an argument; `server.ts` builds them from the environment.
+- Added `src/utils/logger.ts`. It logs event names, request ids, outcomes and error class names only.
+- Added an `X-Request-Id` response header, which was not requested (decision 44).
+- Added `tests/helpers/testApp.ts` and `tests/secureInquiry.test.ts` (48 tests); `tests/health.test.ts` now also covers the JSON 404 (4 tests).
+- Removed `src/middleware/.gitkeep`. Added decisions 36 to 44, edited decisions 13 and 28, and updated `README.md`.
+
+**Checks performed (step 2):**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 7 test files, 204 tests, all passed; run 3 more times in a row, all passed |
+| `npm run build` | Passed |
+| Built server via `npm start`, valid request with `curl` | 200 `{"answer":"Generated Answer"}`; audit file had one record with encrypted original and redacted text |
+| Same server: blank message, malformed JSON, form body, unknown path | 400, 400, 415, 404, each with a fixed JSON body |
+| Same server after overwriting the audit file with invalid JSON | 500 `{"error":"Internal Server Error"}`; one `audit_failed` log line with request id and reason |
+| Built server with `MOCK_AI_FAILURE_RATE=1`, four requests | Four 503 `{"answer":"Service Busy"}`; audit outcomes `ai_failure` ×3 then `circuit_open` |
+| `grep` for the test SSN in that audit file and server log | 0 matches in both |
+
+**Not checked:**
+
+- The 5-second AI timeout through HTTP. It is tested on the breaker alone with a 20 ms timeout.
+- Recovery after `CIRCUIT_RESET_MS` on the running server. It is tested with a fake clock.
+- Load or many simultaneous clients beyond 20 parallel requests in one test.
+- Compressed request bodies (`Content-Encoding: gzip`) and charsets other than UTF-8.
+- No linter or formatter is configured, so none was run.
+- Nothing was pushed. The repository has no remote.

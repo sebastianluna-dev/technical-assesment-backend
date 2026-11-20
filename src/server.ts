@@ -1,5 +1,9 @@
 import { createApp } from "./app.js";
 import { loadEnv, type Env } from "./config/env.js";
+import { createAuditRepository } from "./repositories/auditRepository.js";
+import { createCircuitBreaker } from "./services/circuitBreaker.js";
+import { createEncryptionService } from "./services/encryption.js";
+import { createMockAiClient } from "./services/mockAiClient.js";
 
 function loadEnvOrExit(): Env {
   try {
@@ -13,7 +17,15 @@ function loadEnvOrExit(): Env {
 }
 
 const env = loadEnvOrExit();
-const app = createApp();
+const app = createApp({
+  aiClient: createMockAiClient({ failureRate: env.mockAiFailureRate }),
+  circuitBreaker: createCircuitBreaker({
+    failureThreshold: env.circuitFailureThreshold,
+    resetTimeoutMs: env.circuitResetMs,
+  }),
+  encryption: createEncryptionService(env.encryptionKey),
+  auditRepository: createAuditRepository(env.auditLogPath),
+});
 
 const server = app.listen(env.port, () => {
   console.log(`Server listening on http://localhost:${env.port} (${env.nodeEnv})`);
