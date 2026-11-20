@@ -9,6 +9,12 @@ export interface Env {
   encryptionKey: Buffer;
   /** Path of the JSON file that stores audit records. */
   auditLogPath: string;
+  /** Consecutive AI failures that open the circuit breaker. */
+  circuitFailureThreshold: number;
+  /** Milliseconds the circuit stays open before a trial call. */
+  circuitResetMs: number;
+  /** Probability (0 to 1) that the mock AI call fails. */
+  mockAiFailureRate: number;
 }
 
 const NODE_ENVS: readonly NodeEnv[] = ["development", "test", "production"];
@@ -40,6 +46,23 @@ function parseEncryptionKey(raw: string | undefined): Buffer {
   return key;
 }
 
+function parseNumber(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  isValid: (value: number) => boolean,
+  expected: string,
+): number {
+  if (raw === undefined || raw.trim() === "") {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!isValid(value)) {
+    throw new Error(`Invalid ${name} "${raw}". Expected ${expected}.`);
+  }
+  return value;
+}
+
 /**
  * Reads and validates the environment. Throws on invalid values so a bad
  * configuration stops the process at startup instead of failing later.
@@ -65,5 +88,35 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
 
   const auditLogPath = source.AUDIT_LOG_PATH?.trim() || DEFAULT_AUDIT_LOG_PATH;
 
-  return { nodeEnv: nodeEnv as NodeEnv, port, encryptionKey, auditLogPath };
+  const circuitFailureThreshold = parseNumber(
+    "CIRCUIT_FAILURE_THRESHOLD",
+    source.CIRCUIT_FAILURE_THRESHOLD,
+    3,
+    (value) => Number.isInteger(value) && value >= 1,
+    "an integer of 1 or more",
+  );
+  const circuitResetMs = parseNumber(
+    "CIRCUIT_RESET_MS",
+    source.CIRCUIT_RESET_MS,
+    30_000,
+    (value) => Number.isInteger(value) && value >= 0,
+    "an integer of 0 or more",
+  );
+  const mockAiFailureRate = parseNumber(
+    "MOCK_AI_FAILURE_RATE",
+    source.MOCK_AI_FAILURE_RATE,
+    0,
+    (value) => value >= 0 && value <= 1,
+    "a number between 0 and 1",
+  );
+
+  return {
+    nodeEnv: nodeEnv as NodeEnv,
+    port,
+    encryptionKey,
+    auditLogPath,
+    circuitFailureThreshold,
+    circuitResetMs,
+    mockAiFailureRate,
+  };
 }

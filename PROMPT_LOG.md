@@ -186,3 +186,31 @@ Entries are added after each task. Dates are local machine dates.
 - File permissions (`0600`) were asserted on macOS only.
 - No linter or formatter is configured, so none was run.
 - Nothing was pushed. The repository has no remote.
+
+---
+
+## 4. POST /secure-inquiry
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Implement POST /secure-inquiry accepting exactly userId and message as strings. Require application/json, reject blank values without modifying the original message, limit userId to 100 characters, message to 10,000 characters and the JSON body to 64 KB. Validate first, redact the message, call the mock through the circuit breaker and persist the audit record before responding. Return HTTP 200 with {"answer":"Generated Answer"} on success and HTTP 503 with {"answer":"Service Busy"} for AI failures or an open circuit. Audit every valid request, including fallback responses. Return a generic HTTP 500 if auditing fails. Keep validation and storage errors out of the breaker’s failure count, and never expose request contents or stack traces in errors.
+
+**Outcome:**
+
+### Step 1: mock AI client and circuit breaker
+
+- The prompt mentions "the mock" and "the circuit breaker". Neither existed in the project, and a search of the workspace found no spec for them, so both were written with assumed defaults (decision 33).
+- Added `src/services/mockAiClient.ts`: an `AiClient` interface and `createMockAiClient()`, which returns `Generated Answer` and can fail at a configurable rate.
+- Added `src/services/circuitBreaker.ts`: closed, open and half-open states; opens after 3 consecutive failures, stays open 30 seconds, then allows one trial call; a call over 5 seconds counts as a failure.
+- `loadEnv()` reads `CIRCUIT_FAILURE_THRESHOLD`, `CIRCUIT_RESET_MS` and `MOCK_AI_FAILURE_RATE`, all optional. `.env.example` lists them.
+- Added `tests/circuitBreaker.test.ts` (15 tests) and 7 tests in `tests/env.test.ts`.
+- Nothing uses the breaker or the mock at the end of this step.
+
+**Checks performed (step 1):**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 6 test files, 154 tests, all passed |

@@ -149,3 +149,23 @@ The error names the file path and the kind of problem (including the index and f
 ## 32. No logging in the encryption service or the repository
 
 Neither module calls `console` or any logger; they report through return values and typed errors whose messages carry no message text and no key material. The only `console` calls in `src` are in `server.ts` (startup, shutdown, configuration error message). Tests assert that the repository writes nothing to the console and that error messages do not contain the original text or the key.
+
+## 33. The mock AI and the circuit breaker were built here, with assumed behaviour
+
+The request for `POST /secure-inquiry` refers to "the mock" and "the circuit breaker", but neither existed and no written spec for them was available. Both were written with the defaults below. They are assumptions to confirm against the assessment text.
+
+## 34. Mock AI client behind an `AiClient` interface
+
+`createMockAiClient()` in `src/services/mockAiClient.ts` implements `generateAnswer(prompt)` and returns the fixed text `Generated Answer`. It ignores the prompt and does not store or log it. `MOCK_AI_FAILURE_RATE` (0 to 1, default 0) makes it fail at random so the 503 path can be seen by hand; the default never fails. A real provider would implement the same interface.
+
+## 35. Circuit breaker: consecutive failures, fixed open time, one trial call
+
+`createCircuitBreaker()` in `src/services/circuitBreaker.ts` is a small hand-written state machine rather than a library, so its rules are visible and testable with a fake clock:
+
+- **Closed:** calls pass. `CIRCUIT_FAILURE_THRESHOLD` consecutive failures (default 3) open the circuit; any success resets the count.
+- **Open:** calls are rejected with `CircuitOpenError` without running, for `CIRCUIT_RESET_MS` (default 30,000).
+- **Half-open:** one trial call runs. Success closes the circuit, failure opens it for another full period. Other calls are rejected while the trial is in flight.
+
+A call that takes more than 5 seconds is a failure (`CircuitTimeoutError`); the slow operation itself is not cancelled, only abandoned. The breaker counts only what happens inside the function it is given, which is how validation and storage errors stay out of the count: they never run inside it.
+
+State is in memory and per process. It resets on restart and is not shared between instances.

@@ -12,6 +12,9 @@ describe("loadEnv", () => {
       port: 3000,
       encryptionKey: key,
       auditLogPath: "data/audit-log.json",
+      circuitFailureThreshold: 3,
+      circuitResetMs: 30_000,
+      mockAiFailureRate: 0,
     });
   });
 
@@ -36,6 +39,34 @@ describe("loadEnv", () => {
   it("rejects an unknown NODE_ENV", () => {
     expect(() => loadEnv({ ENCRYPTION_KEY, NODE_ENV: "staging" })).toThrow(
       /Invalid NODE_ENV/,
+    );
+  });
+});
+
+describe("loadEnv: circuit breaker and mock AI", () => {
+  it("reads the three settings", () => {
+    const env = loadEnv({
+      ENCRYPTION_KEY,
+      CIRCUIT_FAILURE_THRESHOLD: "5",
+      CIRCUIT_RESET_MS: "1000",
+      MOCK_AI_FAILURE_RATE: "0.25",
+    });
+
+    expect(env.circuitFailureThreshold).toBe(5);
+    expect(env.circuitResetMs).toBe(1000);
+    expect(env.mockAiFailureRate).toBe(0.25);
+  });
+
+  it.each([
+    ["CIRCUIT_FAILURE_THRESHOLD", "0"],
+    ["CIRCUIT_FAILURE_THRESHOLD", "1.5"],
+    ["CIRCUIT_RESET_MS", "-1"],
+    ["CIRCUIT_RESET_MS", "soon"],
+    ["MOCK_AI_FAILURE_RATE", "2"],
+    ["MOCK_AI_FAILURE_RATE", "-0.1"],
+  ])("rejects %s=%s", (name, value) => {
+    expect(() => loadEnv({ ENCRYPTION_KEY, [name]: value })).toThrow(
+      new RegExp(`Invalid ${name}`),
     );
   });
 });
