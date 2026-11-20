@@ -389,3 +389,12 @@ Reviewed and kept as they are:
 - The two groups of audit-failure tests (corrupt file and injected repository): apart from the one removed, they fail in different ways and check different leaks.
 
 No files were merged, no helper was added and no application code changed.
+
+## 59. Manual demo guide and a Compose override for a failing AI
+
+`docs/manual-demo.md` is a walkthrough with `curl` against the existing Docker setup, written for a short recording. It reuses the README's four-request loop and its explanation of why a restart cannot show recovery.
+
+- **Isolation by Compose project name.** The guide sets `COMPOSE_PROJECT_NAME=secure-inquiry-demo` and `HOST_PORT=3100`. Compose names the volume after the project, so the demo's audit file is separate from any existing one, and `docker compose down -v` can only delete the demo's.
+- **`compose.failing-ai.yaml`.** A four-line override that sets `MOCK_AI_FAILURE_RATE=1` and `MOCK_AI_DELAY_MS=2000`. `compose.yaml` passes settings only through `.env`, so without the override the demo would have to edit `.env` on camera, next to the key. Starting with and without the override is also what restarts the server and restores it.
+- **The key stays out of the recording.** No step prints it. The optional decryption step runs inside the container with the key the server already holds and prints only the synthetic message. The guide lists the commands that would reveal the key.
+- **What the guide does not claim.** After the breaker demonstration the service is restored by a restart, which also resets the in-memory breaker. The guide says so and points to `npm run demo` for recovery inside one process.

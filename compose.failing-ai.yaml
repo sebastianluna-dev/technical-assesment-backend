@@ -1,0 +1,8 @@
+# Demo override: the mock AI always fails, after a 2-second delay.
+# Used by docs/manual-demo.md to show the circuit breaker:
+#   docker compose -f compose.yaml -f compose.failing-ai.yaml up -d
+services:
+  api:
+    environment:
+      MOCK_AI_FAILURE_RATE: "1"
+      MOCK_AI_DELAY_MS: "2000"

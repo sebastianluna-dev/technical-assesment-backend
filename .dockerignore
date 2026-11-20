@@ -22,4 +22,5 @@ docs/
 *.md
 Dockerfile
 compose.yaml
+compose.failing-ai.yaml
 vitest.config.ts

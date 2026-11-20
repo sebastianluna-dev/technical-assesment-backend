@@ -254,6 +254,8 @@ DEMO_AI_DELAY_MS=1000 DEMO_RESET_MS=5000 npm run demo
 
 The only difference from `npm start` is the mock AI: in the demo it has a switch, so the script can make it fail and recover on demand.
 
+A step-by-step version with `curl` against the Docker container, written for recording a short video, is in [docs/manual-demo.md](docs/manual-demo.md).
+
 ### Showing the circuit breaker by hand
 
 With the real server, the mock can be made to fail every time and to take a visible amount of time:

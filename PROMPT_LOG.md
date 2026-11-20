@@ -641,3 +641,50 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 
 - No coverage tool is configured, so line coverage before and after was not measured; the comparison was made by reading the tests.
 - Nothing was pushed.
+
+---
+
+## 15. Manual demonstration guide
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Add a short manual demonstration guide for recording the backend in action. Review the existing demo scripts and documentation first and reuse what is useful. Write individually runnable curl commands in docs/manual-demo.md, using the existing local Docker setup. Cover the health endpoint, a successful inquiry containing synthetic email, credit card, and SSN data, and an invalid request. Show how to inspect the corresponding audit record and confirm that the original message is stored encrypted while the redacted message is readable.
+>
+> Include a deterministic circuit breaker demonstration: configure the mock to always fail with a 2,000 ms delay, then send four consecutive requests to the same running process. Display the HTTP status and elapsed time for each request so the fourth visibly skips the mock delay. Explain any required restart and how to restore normal operation afterward. Use isolated demo data, preserve existing audit records, and keep encryption keys out of the recording. Keep the walkthrough suitable for a three-to-five-minute video, with expected results beside each step.
+
+**Outcome:**
+
+- Reviewed `scripts/demo.ts`, the README sections on the demo, the manual breaker walkthrough and Docker, `compose.yaml` and the `Dockerfile`. Reused: the four-request `curl` loop with status and time, the Compose setup with `HOST_PORT`, and the explanation that a restart resets the breaker.
+- Added `docs/manual-demo.md`: six timed steps (health, successful inquiry, invalid request, audit record, circuit breaker, back to normal), each with its command and the output captured from a real run, plus cleanup and a troubleshooting table. About 3.5 minutes by the step timings.
+- Added `compose.failing-ai.yaml`, a Compose override that makes the mock always fail after 2,000 ms, and listed it in `.dockerignore`.
+- The demo runs as its own Compose project on port 3100 with its own audit volume. No command prints the key.
+- README links to the guide. Decision 59 added. No application code or test changed.
+
+**Checks performed:**
+
+Every command in the guide was run in order against the container built from the current code.
+
+| Check | Result |
+| --- | --- |
+| `docker compose up -d --build` with the demo project name and port | Container started; volume `secure-inquiry-demo_audit-data` created |
+| `GET /health` | 200, `{"status":"ok"}` |
+| Inquiry with a synthetic email, card and SSN | 200 in 2.04 s |
+| Request without `message` | 400, `["message is required"]`, in 0.004 s |
+| Audit inspection | 1 record; `redactedMessage` with three tokens; `originalMessage` as ciphertext, IV and tag |
+| `grep -c` for the card, SSN and email in the audit file | 0 |
+| Decryption inside the container | Printed the original message; the key was not printed |
+| Restart with `compose.failing-ai.yaml`, four requests | 503 in 2.03 s, 2.02 s, 2.02 s, then 503 in 0.015 s |
+| Outcomes after the restart | `answered`, `ai_failure` ×3, `circuit_open`: the earlier record was preserved |
+| `docker compose up -d` without the override, one request | 200 in 2.03 s |
+| `docker compose logs api` | Only the startup line; no key |
+| `docker compose down` | Container and network removed, volume kept |
+
+**Not checked:**
+
+- The guide was not recorded or timed with narration; the step durations are estimates.
+- `docker compose down -v` and the `unset` line were not run as written. The test volume was removed afterwards with `docker volume rm`.
+- The troubleshooting rows were not reproduced, except the 503 while the failing container is running.
+- No other Compose project of this repository existed on this machine, so "existing records are preserved" was verified for the demo's own volume across restarts, not against a second volume.
+- Nothing was pushed.
