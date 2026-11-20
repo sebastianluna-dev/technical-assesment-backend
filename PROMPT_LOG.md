@@ -107,3 +107,36 @@ Entries are added after each task. Dates are local machine dates.
 - No linter or formatter is configured, so none was run.
 - The function was not tested through HTTP, because no endpoint uses it.
 - Nothing was pushed. The repository has no remote.
+
+---
+
+## 3. AES-256-GCM encryption and JSON audit repository
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Implement encryption using node:crypto and AES-256-GCM. Load a base64-encoded 32-byte key from runtime configuration and reject missing or invalid keys at startup. Generate a fresh cryptographically random 12-byte IV for every encryption and retain the 16-byte authentication tag. Store ciphertext, IV and tag as base64. Add an audit repository backed by a local JSON file containing requestId, userId, timestamp, outcome, the encrypted original message and the redacted message in plaintext. Serialize concurrent writes and use atomic file replacement. Preserve existing records and report corrupted files instead of silently resetting them. Never log original messages or keys. Test decryption, tampering and concurrent writes.
+
+**Outcome:**
+
+### Step 1: key in runtime configuration
+
+- `loadEnv()` now requires `ENCRYPTION_KEY` (standard padded base64 that decodes to exactly 32 bytes) and returns it as a `Buffer`. It also reads `AUDIT_LOG_PATH` (default `data/audit-log.json`).
+- Missing, malformed or wrong-length keys throw. `server.ts` prints `Configuration error: <message>` and exits with code 1 before listening. Messages never contain the key.
+- Added `src/utils/base64.ts` with a strict base64 decoder.
+- Updated `.env.example` with the two new variables and the command that generates a key.
+- Created a local `.env` with a freshly generated key so `npm run dev` and `npm start` work. It is ignored by Git and was not committed.
+- Rewrote `tests/env.test.ts` (21 tests): every existing case now passes a key, plus missing, empty, non-base64, base64url, unpadded and wrong-length keys, and a check that error messages do not contain the value.
+
+**Checks performed (step 1):**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 3 test files, 78 tests, all passed |
+| `npm run build` | Passed |
+| `ENCRYPTION_KEY= node dist/server.js` | Printed "Configuration error: Missing ENCRYPTION_KEY…", exit code 1 |
+| Built server with a 16-byte key | Printed "…decodes to 16 bytes, expected 32", exit code 1 |
+| `PORT=3461 npm start` with the local `.env`, then `curl /health` | `{"status":"ok"}` |
+| `git check-ignore .env` | `.env` is ignored |

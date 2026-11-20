@@ -1,12 +1,44 @@
+import { decodeBase64 } from "../utils/base64.js";
+
 export type NodeEnv = "development" | "test" | "production";
 
 export interface Env {
   nodeEnv: NodeEnv;
   port: number;
+  /** Raw 32-byte AES-256 key. Never log this value. */
+  encryptionKey: Buffer;
+  /** Path of the JSON file that stores audit records. */
+  auditLogPath: string;
 }
 
 const NODE_ENVS: readonly NodeEnv[] = ["development", "test", "production"];
 const DEFAULT_PORT = 3000;
+const DEFAULT_AUDIT_LOG_PATH = "data/audit-log.json";
+export const ENCRYPTION_KEY_BYTES = 32;
+
+/**
+ * Error messages here describe the problem without echoing the value, so a
+ * mistyped key never ends up in a log.
+ */
+function parseEncryptionKey(raw: string | undefined): Buffer {
+  const value = raw?.trim();
+  if (value === undefined || value === "") {
+    throw new Error(
+      `Missing ENCRYPTION_KEY. Expected a base64-encoded ${ENCRYPTION_KEY_BYTES}-byte key.`,
+    );
+  }
+
+  const key = decodeBase64(value);
+  if (key === undefined) {
+    throw new Error("Invalid ENCRYPTION_KEY: the value is not valid base64.");
+  }
+  if (key.length !== ENCRYPTION_KEY_BYTES) {
+    throw new Error(
+      `Invalid ENCRYPTION_KEY: it decodes to ${key.length} bytes, expected ${ENCRYPTION_KEY_BYTES}.`,
+    );
+  }
+  return key;
+}
 
 /**
  * Reads and validates the environment. Throws on invalid values so a bad
@@ -29,5 +61,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     );
   }
 
-  return { nodeEnv: nodeEnv as NodeEnv, port };
+  const encryptionKey = parseEncryptionKey(source.ENCRYPTION_KEY);
+
+  const auditLogPath = source.AUDIT_LOG_PATH?.trim() || DEFAULT_AUDIT_LOG_PATH;
+
+  return { nodeEnv: nodeEnv as NodeEnv, port, encryptionKey, auditLogPath };
 }

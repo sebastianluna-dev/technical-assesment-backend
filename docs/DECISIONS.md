@@ -85,3 +85,17 @@ The local part is limited to 64 characters and each domain label to 63, the limi
 ## 20. Idempotency comes from the token format
 
 The tokens `<REDACTED: EMAIL>`, `<REDACTED: CREDIT_CARD>` and `<REDACTED: SSN>` contain no digit and no `@`, so no pattern can match inside one, and a token placed between two fragments keeps them from joining into a new match. Tests cover this with adversarial inputs.
+
+## 21. The encryption key is required configuration, validated at startup
+
+`loadEnv()` reads `ENCRYPTION_KEY`, requires standard padded base64 and requires it to decode to exactly 32 bytes. A missing, malformed or wrong-length key throws, and `server.ts` prints the message and exits with code 1 before listening. There is no default or generated fallback key: a server that silently invents a key writes data nobody can decrypt after a restart.
+
+Error messages state the problem and the decoded length, never the value. `server.ts` prints only the message of a configuration error, not the stack or the environment.
+
+## 22. Strict base64 decoding in `src/utils/base64.ts`
+
+`Buffer.from(value, "base64")` ignores invalid characters instead of failing, so a malformed key could decode to 32 bytes by accident. `decodeBase64()` checks the format first and returns `undefined` otherwise. It sits in a new `src/utils` folder because both `config` and `services` need it and neither should import from the other. Base64url and unpadded values are rejected to keep one accepted format.
+
+## 23. The audit file path is configuration
+
+`AUDIT_LOG_PATH` defaults to `data/audit-log.json`. `data/` is ignored by Git.

@@ -1,7 +1,18 @@
 import { createApp } from "./app.js";
-import { loadEnv } from "./config/env.js";
+import { loadEnv, type Env } from "./config/env.js";
 
-const env = loadEnv();
+function loadEnvOrExit(): Env {
+  try {
+    return loadEnv();
+  } catch (error) {
+    // Message only: no stack trace and never the environment itself.
+    const message = error instanceof Error ? error.message : "unknown error";
+    console.error(`Configuration error: ${message}`);
+    process.exit(1);
+  }
+}
+
+const env = loadEnvOrExit();
 const app = createApp();
 
 const server = app.listen(env.port, () => {
