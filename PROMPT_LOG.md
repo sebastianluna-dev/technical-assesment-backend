@@ -32,3 +32,34 @@ Entries are added after each task. Dates are local machine dates.
 | `npx tsc --noEmit` | Passed, no errors (only `vitest.config.ts` to check at this point) |
 | `npx vitest run --passWithNoTests` | Exit code 0, "No test files found" |
 | `git status` before the commit | `node_modules/` not listed; no `.env` file exists |
+
+### Step 2: application, server and GET /health
+
+- `src/app.ts` exports `createApp()`, which builds the Express app and does not listen on a port.
+- `src/server.ts` is the only file that starts the server: it loads the environment, calls `createApp()`, listens, and closes the server on `SIGTERM` or `SIGINT`.
+- `src/config/env.ts` exports `loadEnv()`, which reads `NODE_ENV` (default `development`) and `PORT` (default `3000`) and throws on invalid values.
+- `src/routes/health.ts` implements `GET /health`, which responds `200` with `{"status":"ok"}`. No other route exists; any other path gets Express's default 404.
+- Added `tests/health.test.ts` (Supertest against `createApp()`) and `tests/env.test.ts`.
+- Added a short `README.md` with the scripts and the folder layout.
+- `src/middleware`, `src/services` and `src/repositories` are still empty.
+
+**Checks performed (step 2):**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 2 test files, 6 tests, all passed |
+| `npm run build` | Passed; `dist/` contains `app.js`, `server.js`, `config/`, `routes/` |
+| `PORT=3457 node dist/server.js`, then `curl /health` | HTTP 200, body `{"status":"ok"}` |
+| `curl /nope` against the built server | HTTP 404 |
+| `SIGTERM` to the built server | Logged "closing server" and exited with code 0 |
+| `PORT=3458 npm run dev`, then `curl /health` | Body `{"status":"ok"}` |
+| `git status` before the commit | `dist/` and `node_modules/` not listed |
+
+**Not checked:**
+
+- No linter or formatter is configured, so none was run.
+- `npm start` itself was not run; the built server was started with `node dist/server.js` directly, without the `--env-file-if-exists` flag the script adds.
+- Restart-on-change in `npm run dev` was not exercised; the server was only started once and queried.
+- No `.env` file was created, so loading values from one was not tested. `tsx` printed ".env not found. Continuing without it."
+- Nothing was pushed. The repository has no remote.

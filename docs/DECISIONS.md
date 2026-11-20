@@ -33,3 +33,27 @@ The `dev` and `start` scripts pass `--env-file-if-exists=.env`, a built-in Node.
 ## 8. Empty layers are kept as folders only
 
 `src/middleware`, `src/services` and `src/repositories` contain only a `.gitkeep`. No placeholder code was written for layers that `GET /health` does not need.
+
+## 9. `createApp()` is separate from server startup
+
+`src/app.ts` builds and returns the Express app; `src/server.ts` reads the environment and calls `listen`. Tests import `createApp()` and pass it to Supertest, so they open no fixed port and never import `server.ts`.
+
+## 10. Configuration is read in one place and validated
+
+`loadEnv()` in `src/config/env.ts` is the only code that reads `process.env`. It takes the source object as a parameter so tests can call it with plain objects, and it throws on an unknown `NODE_ENV` or an invalid `PORT`, which stops the process at startup. Validation is hand-written because two variables do not justify a schema library.
+
+## 11. `GET /health` returns only `{"status":"ok"}`
+
+The endpoint is a liveness check: it reports that the process answers HTTP. It has no uptime, version or dependency checks because there are no dependencies yet. The route lives in its own router mounted at `/health`.
+
+## 12. Graceful shutdown
+
+`server.ts` closes the HTTP server on `SIGTERM` and `SIGINT` and then exits with code 0, so in-flight requests finish when the process is stopped by a container runtime or by Ctrl+C.
+
+## 13. No error or 404 middleware yet
+
+The request asked for `GET /health` only, so unknown paths get Express's default 404. JSON error and not-found handlers belong in `src/middleware` once real endpoints define the error format.
+
+## 14. `x-powered-by` is disabled
+
+The header only advertises the framework. A test asserts it is absent.
