@@ -600,3 +600,44 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 
 - The Docker image was not rebuilt.
 - Nothing was pushed.
+
+---
+
+## 14. Remove redundant tests
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Review the existing health, validation, mock, service, and endpoint tests and simplify them where there is clear redundancy. Tests at different layers may catch different bugs, so check their purpose before removing either one. Preserve coverage for invalid input, HTTP responses, redaction before the mock call, the default delay, fallback responses, and audit failures. Keep each test focused and readable, and consolidate files only when it improves clarity. Avoid adding complex test helpers or changing application code to make tests easier. For each removed test, explain why it was redundant and where its behavior remains covered. If no worthwhile duplication remains, leave the tests as they are. Run the affected tests and typecheck, then summarize the changes.
+
+**Outcome:**
+
+- All 162 tests in the five files were read. Nine were removed, all from `tests/secureInquiry.test.ts` (five tests and four table rows), each a duplicate of another test at the same HTTP layer. Nothing was removed across layers.
+- `tests/health.test.ts`, `tests/validation.test.ts`, `tests/mockAiClient.test.ts` and `tests/secureInquiryService.test.ts` were left unchanged: no worthwhile duplication was found in them.
+- No file was merged, no helper added, no application code changed. README test count updated to 404. Decision 58 added, with the reasons for what was kept.
+
+| Removed test (all in `tests/secureInquiry.test.ts`) | Why it was redundant | Where the behaviour is still covered |
+| --- | --- | --- |
+| success: "gives each request its own id and record" (20 parallel requests) | A smaller copy of the concurrency test | concurrency: "stores one decryptable record per request for 60 parallel requests" checks 60 distinct request ids and one record per user |
+| redaction end to end: "passes the exact redaction of the full message for the first case" | A second literal check of the prompt sent to the AI | success: "sends only the redacted message to the AI" compares the prompt with a literal containing all three kinds; the table in the same block checks eight messages; the exact redaction rules are in `tests/redaction.test.ts` |
+| AI failures: "opens the circuit after the threshold and stops calling the AI" | Same sequence and assertions as two stricter tests in the same file | circuit breaker sequence: "opens on the third consecutive failure, not before" and "never invokes the mock on the fourth call" |
+| AI failures: "recovers after the reset time when the AI works again" | Recovery was asserted twice in the same file | circuit breaker sequence: "permits only one probe when half-open" (200, circuit closed) and "opens again when the probe fails" (no call one millisecond before the reset time) |
+| injected storage failures: "keeps the breaker closed through repeated storage failures" | Same assertions as the corrupt-file test; only the source of the failure differed | audit failures: "does not count storage failures in the breaker" at HTTP level, and "does not count audit failures in the breaker" in `tests/secureInquiryService.test.ts` |
+| validation rows "an object message" and "an array message" | Same branch and same error text as the rows kept | rows "a null message" and "a numeric userId" at HTTP level; all five non-string types for both fields in `tests/validation.test.ts` |
+| validation row "a whitespace message" | Same branch and same error text as the rows kept | rows "an empty message" and "a blank userId" at HTTP level; seven kinds of blank value for both fields in `tests/validation.test.ts` |
+| adversarial row "a lone surrogate in the userId" | The field makes no difference once the escape has been parsed | row "a lone surrogate in the message" at HTTP level; both surrogate halves for both fields in `tests/validation.test.ts` |
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| The five affected test files | 153 tests, all passed (162 before) |
+| `npm test` | 10 test files, 404 tests, all passed (413 before) |
+| Coverage named in the prompt | Still present: invalid input (unit table and HTTP table), HTTP responses, redaction before the mock call (service and HTTP), the default delay (mock tests with fake timers), fallback responses (service and HTTP), audit failures (service, corrupt file and injected repository) |
+
+**Not checked:**
+
+- No coverage tool is configured, so line coverage before and after was not measured; the comparison was made by reading the tests.
+- Nothing was pushed.

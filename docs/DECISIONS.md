@@ -365,3 +365,27 @@ The class was removed. The check stays, in a named function (`requireUsableAnswe
 Cost: the log line now says `TypeError` instead of `UnusableAnswerError`, so in the logs an unusable answer cannot be told apart from a provider that itself throws a `TypeError`. Both are AI failures and are treated the same.
 
 In the same change the service's `handle` was split into two named steps, `askAi` and `writeAuditRecord`. AI errors and audit errors remain separate: `askAi` never throws and turns every AI failure into the fallback, and `writeAuditRecord` runs outside the breaker and is the only source of `AuditFailureError`. In `app.ts` the service is built into a named variable before it is passed to the router.
+
+## 58. Nine redundant HTTP tests were removed
+
+The health, validation, mock, service and endpoint tests were reviewed for duplication. A test was removed only when another test **at the same layer** asserts the same behaviour, or when it repeated a branch that the same table already exercises. Tests that look alike but run at different layers were kept, because they fail for different reasons: the unit test catches a wrong rule, the service test a wrong mapping to outcome and status, the HTTP test wrong wiring, headers or body.
+
+| Removed test (all in `tests/secureInquiry.test.ts`) | Why it was redundant | Where the behaviour is still covered |
+| --- | --- | --- |
+| success: "gives each request its own id and record" (20 parallel requests) | A smaller copy of the concurrency test | concurrency: "stores one decryptable record per request for 60 parallel requests" checks 60 distinct request ids and one record per user |
+| redaction end to end: "passes the exact redaction of the full message for the first case" | A second literal check of the prompt sent to the AI | success: "sends only the redacted message to the AI" compares the prompt with a literal containing all three kinds; the table in the same block checks eight messages; the exact redaction rules are in `tests/redaction.test.ts` |
+| AI failures: "opens the circuit after the threshold and stops calling the AI" | Same sequence and assertions as two stricter tests in the same file | circuit breaker sequence: "opens on the third consecutive failure, not before" and "never invokes the mock on the fourth call" |
+| AI failures: "recovers after the reset time when the AI works again" | Recovery was asserted twice in the same file | circuit breaker sequence: "permits only one probe when half-open" (200, circuit closed) and "opens again when the probe fails" (no call one millisecond before the reset time) |
+| injected storage failures: "keeps the breaker closed through repeated storage failures" | Same assertions as the corrupt-file test; only the source of the failure differed | audit failures: "does not count storage failures in the breaker" at HTTP level, and "does not count audit failures in the breaker" in `tests/secureInquiryService.test.ts` |
+| validation rows "an object message" and "an array message" | Same branch and same error text as the rows kept | rows "a null message" and "a numeric userId" at HTTP level; all five non-string types for both fields in `tests/validation.test.ts` |
+| validation row "a whitespace message" | Same branch and same error text as the rows kept | rows "an empty message" and "a blank userId" at HTTP level; seven kinds of blank value for both fields in `tests/validation.test.ts` |
+| adversarial row "a lone surrogate in the userId" | The field makes no difference once the escape has been parsed | row "a lone surrogate in the message" at HTTP level; both surrogate halves for both fields in `tests/validation.test.ts` |
+
+Reviewed and kept as they are:
+
+- `tests/health.test.ts`, `tests/validation.test.ts`, `tests/mockAiClient.test.ts` and `tests/secureInquiryService.test.ts`: no test repeats another in the same file.
+- Service and HTTP tests that describe the same scenario (fallback on AI failure, generic error on audit failure, breaker opening): the service tests use fake timers and the default 30-second and 5-second settings; the HTTP tests check the status code, the body, the headers and that nothing leaks.
+- The HTTP length-limit tests, although the unit tests check the same limits: only at HTTP level do they meet the 64 KB body limit (10,000 emoji are 40 KB).
+- The two groups of audit-failure tests (corrupt file and injected repository): apart from the one removed, they fail in different ways and check different leaks.
+
+No files were merged, no helper was added and no application code changed.
