@@ -71,6 +71,12 @@ describe("redactMessage: credit cards", () => {
     ["mixed separators", "4111 1111-1111 1111"],
     ["fails Luhn", "1234 5678 9012 3456"],
     ["all zeros", "0000000000000000"],
+    ["dots", "4111.1111.1111.1111"],
+    ["slashes", "4111/1111/1111/1111"],
+    ["spaced hyphens", "4111 - 1111 - 1111 - 1111"],
+    ["double spaces", "4111  1111  1111  1111"],
+    ["zero-width spaces", "4111\u200B1111\u200B1111\u200B1111"],
+    ["full-width digits and middle dots", "４１１１・１１１１・１１１１・１１１１"],
   ])("redacts a candidate with %s", (_label, card) => {
     expect(redactMessage(card)).toBe(CARD);
   });
@@ -84,8 +90,12 @@ describe("redactMessage: credit cards", () => {
     ["12 digits", "123456789012"],
     ["12 digits with separators", "1234 5678 9012"],
     ["20 consecutive digits", "12345678901234567890"],
-    ["digits split by double spaces", "4111  1111  1111  1111"],
-    ["digits split by dots", "4111.1111.1111.1111"],
+    ["groups four separators apart", "4111 -- 1111 -- 1111 -- 1111"],
+    ["groups split by commas", "4111,1111,1111,1111"],
+    ["groups split by words", "4111 then 1111 then 1111 then 1111"],
+    ["groups split by line breaks", "4111\n1111\r\n1111\n1111"],
+    ["a price list", "12.50, 13.75, 100.00, 7.25, 1,299.99"],
+    ["a timestamp", "2026-11-20T10:30:15Z"],
   ])("leaves %s alone", (_label, text) => {
     expect(redactMessage(text)).toBe(text);
   });
@@ -96,10 +106,20 @@ describe("redactMessage: credit cards", () => {
     expect(redactMessage("４１１１ １１１１ １１１１ １１１１")).toBe(CARD);
   });
 
-  it("redacts two cards separated by one space as two cards", () => {
-    expect(redactMessage("4111111111111111 5500000000000004")).toBe(
-      `${CARD} ${CARD}`,
-    );
+  it("keeps two cards apart when a comma, a word or a line break is between them", () => {
+    expect(redactMessage("4111111111111111, 5500000000000004")).toBe(`${CARD}, ${CARD}`);
+    expect(redactMessage("4111111111111111 or 5500000000000004")).toBe(`${CARD} or ${CARD}`);
+    expect(redactMessage("4111111111111111\n5500000000000004")).toBe(`${CARD}\n${CARD}`);
+  });
+
+  it("redacts numbers with only separators between them as one candidate, leaving no digits", () => {
+    expect(redactMessage("4111111111111111 5500000000000004")).toBe(CARD);
+    expect(redactMessage("1234 5678 9012 3456 7890 1234")).toBe(CARD);
+    expect(redactMessage("4111 1111 1111 1111 12/27")).toBe(CARD);
+  });
+
+  it("redacts dates and times written together as a known false positive", () => {
+    expect(redactMessage("at 2026-11-20 10:30:15 exactly")).toBe(`at ${CARD} exactly`);
   });
 });
 
@@ -108,6 +128,13 @@ describe("redactMessage: SSNs", () => {
     expect(redactMessage("SSN 123-45-6789.")).toBe(`SSN ${SSN}.`);
   });
 
+  it.each(["123 45 6789", "123.45.6789", "123/45/6789", "123 - 45 - 6789", "123\u00A045\u00A06789"])(
+    "redacts the 3-2-4 grouping written as %j",
+    (ssn) => {
+      expect(redactMessage(`SSN ${ssn}, thanks`)).toBe(`SSN ${SSN}, thanks`);
+    },
+  );
+
   it("redacts nine consecutive digits", () => {
     expect(redactMessage("SSN: 123456789, thanks")).toBe(`SSN: ${SSN}, thanks`);
   });
@@ -115,7 +142,10 @@ describe("redactMessage: SSNs", () => {
   it.each([
     ["eight digits", "12345678"],
     ["ten digits", "1234567890"],
-    ["spaces as separators", "123 45 6789"],
+    ["commas as separators", "123,45,6789"],
+    ["groups on separate lines", "123\n45\n6789"],
+    ["groups four separators apart", "123 -- 45 -- 6789"],
+    ["nine digits spaced one by one", "1 2 3 4 5 6 7 8 9"],
     ["wrong grouping", "12-345-6789"],
     ["a formatted SSN attached to more digits", "123-45-67890"],
     ["a US phone number", "555-123-4567"],
@@ -172,7 +202,7 @@ describe("redactMessage: overlapping matches", () => {
     const output = redactMessage(
       "123-45-6789-0123-4567 123456789@example.com 4111 1111 1111 1111@x.io",
     );
-    expect(output).toBe(`${CARD} ${EMAIL} ${CARD}`);
+    expect(output).toBe(`${CARD} ${CARD}`);
   });
 });
 
@@ -181,12 +211,12 @@ describe("redactMessage: whole messages", () => {
     const input =
       "Hi, I'm john@example.com (alt: john+work@example.com). " +
       "Cards: 4111 1111 1111 1111 and 5500-0000-0000-0004; " +
-      "SSNs: 123-45-6789 / 987654321.";
+      "SSNs: 123-45-6789, 987654321.";
 
     expect(redactMessage(input)).toBe(
       `Hi, I'm ${EMAIL} (alt: ${EMAIL}). ` +
         `Cards: ${CARD} and ${CARD}; ` +
-        `SSNs: ${SSN} / ${SSN}.`,
+        `SSNs: ${SSN}, ${SSN}.`,
     );
   });
 
@@ -283,10 +313,16 @@ describe("redactMessage: numeric boundaries", () => {
     expect(redactMessage("123-45-67890")).toBe("123-45-67890");
   });
 
-  it("separates values joined by punctuation", () => {
-    expect(redactMessage("123-45-6789,987-65-4321;123456789/4111111111111111")).toBe(
-      `${SSN},${SSN};${SSN}/${CARD}`,
+  it("separates values joined by commas or semicolons", () => {
+    expect(redactMessage("123-45-6789,987-65-4321;123456789,4111111111111111")).toBe(
+      `${SSN},${SSN};${SSN},${CARD}`,
     );
+  });
+
+  it("merges values joined by other punctuation into one token", () => {
+    // Two SSNs are 18 digits with only separators between them: one candidate.
+    expect(redactMessage("123-45-6789 / 987-65-4321")).toBe(CARD);
+    expect(redactMessage("123456789/4111111111111111")).toBe(CARD);
   });
 
   it("does not treat decimals, dates, times or prices as sensitive", () => {
@@ -294,9 +330,9 @@ describe("redactMessage: numeric boundaries", () => {
     expect(redactMessage(input)).toBe(input);
   });
 
-  it("redacts short numbers that add up to 13 digits when only spaces or hyphens separate them", () => {
-    // Known false positive: 8 + 8 + 2 digits read as one 18-digit candidate.
-    expect(redactMessage("3.14159265 2026-11-20 10:30")).toBe(`3.${CARD}:30`);
+  it("redacts short numbers that add up to 13 digits when only separators are between them", () => {
+    // Known false positive: 9 + 8 + 4 digits read as one candidate.
+    expect(redactMessage("3.14159265 2026-11-20 10:30")).toBe(CARD);
     expect(redactMessage("2024 2025 2026 2027")).toBe(CARD);
   });
 });
@@ -305,16 +341,16 @@ describe("redactMessage: repeated and mixed matches", () => {
   it("redacts many values of every kind in one message", () => {
     const input = [
       "a@example.com, b+x@example.org; c.d@mail.example.net",
-      "4111 1111 1111 1111 | 5500-0000-0000-0004 | 340000000000009",
-      "123-45-6789 & 987654321 & 111-22-3333",
+      "4111 1111 1111 1111, 5500-0000-0000-0004; 340000000000009",
+      "123-45-6789, 987654321; 111-22-3333",
       "again a@example.com, 4111 1111 1111 1111, 123-45-6789",
     ].join("\n");
 
     expect(redactMessage(input)).toBe(
       [
         `${EMAIL}, ${EMAIL}; ${EMAIL}`,
-        `${CARD} | ${CARD} | ${CARD}`,
-        `${SSN} & ${SSN} & ${SSN}`,
+        `${CARD}, ${CARD}; ${CARD}`,
+        `${SSN}, ${SSN}; ${SSN}`,
         `again ${EMAIL}, ${CARD}, ${SSN}`,
       ].join("\n"),
     );
@@ -328,14 +364,18 @@ describe("redactMessage: repeated and mixed matches", () => {
   });
 
   it("redacts a value repeated two hundred times", () => {
-    const output = redactMessage("x@example.com 123-45-6789 4111111111111111\n".repeat(200));
+    const output = redactMessage("x@example.com, 123-45-6789, 4111111111111111\n".repeat(200));
 
-    expect(output).toBe(`${EMAIL} ${SSN} ${CARD}\n`.repeat(200));
+    expect(output).toBe(`${EMAIL}, ${SSN}, ${CARD}\n`.repeat(200));
   });
 
   it("redacts values with nothing between them and their neighbours", () => {
+    expect(redactMessage("[a@example.com],[123-45-6789],[4111-1111-1111-1111]")).toBe(
+      `[${EMAIL}],[${SSN}],[${CARD}]`,
+    );
+    // Brackets are separators: the SSN and the card become one candidate.
     expect(redactMessage("[a@example.com][123-45-6789][4111-1111-1111-1111]")).toBe(
-      `[${EMAIL}][${SSN}][${CARD}]`,
+      `[${EMAIL}][${CARD}]`,
     );
   });
 });
@@ -382,10 +422,9 @@ describe("redactMessage: adversarial inputs", () => {
   });
 
   it("documents what look-alike characters do not trigger", () => {
-    const zeroWidth = "4111​1111​1111​1111";
     const lineBreaks = "4111\n1111\n1111\n1111";
 
-    for (const input of [zeroWidth, lineBreaks, "john＠example.com"]) {
+    for (const input of [lineBreaks, "john＠example.com"]) {
       expect(redactMessage(input)).toBe(input);
     }
   });

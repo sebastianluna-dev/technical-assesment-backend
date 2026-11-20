@@ -427,3 +427,41 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 - Still not redacted, by decision: `john＠example.com` (full-width at sign), a card grouped with U+202F, `123 45 6789` with spaces or no-break spaces, digits of other scripts. These were run and are listed in `docs/REDACTION.md`.
 - The Docker image was not rebuilt.
 - Nothing was pushed.
+
+---
+
+## 9. Separator policy for numeric candidates
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Extend the sanitizer to handle Unicode email addresses such as josé@example.test, full-width digits, and sensitive numbers separated by punctuation or symbols, not just spaces and hyphens. Allow bounded sequences of separators within a numeric candidate, but do not join unrelated numbers across words or line breaks. Preserve the existing digit-count rules for cards and SSNs, the original message, and accurate replacement positions. Keep the implementation readable and document the separator policy. Update the existing tests with a few representative matches and false-positive cases, avoiding a generic normalization system.
+
+**Outcome:**
+
+- Unicode emails and full-width digits were already implemented in entry 8 and were left as they were. This entry adds the separator policy.
+- `src/services/redaction.ts`: named `SEPARATOR` (punctuation, symbols, spaces, tab, invisible format characters; not letters, line breaks, commas or semicolons), `MAX_SEPARATORS = 3` and `SEPARATOR_RUN`. Cards are matched as the longest run of digits and separator runs, then `isCardCandidate` applies the digit count. SSNs are nine digits together or 3-2-4 with separator runs. Overlap resolution and replacement are unchanged; no normalized copy of the message exists.
+- One behaviour changed on purpose: a run of more than 19 digits that contains separators is now redacted whole instead of redacting its first 19 digits and leaving the rest visible (decision 53).
+- `tests/redaction.test.ts`: new matches (dots, slashes, spaced hyphens, double spaces, zero-width spaces, full-width digits with middle dots; SSNs with spaces, dots, slashes, spaced hyphens, no-break spaces) and new non-matches (four separators apart, commas, words, line breaks, a price list, an ISO timestamp, nine digits spaced one by one). 12 existing expectations were updated because the behaviour they described changed: formats that used to be left alone and are now redacted, and values that used to get separate tokens and now share one.
+- `tests/secureInquiry.test.ts`: 1 new end-to-end case and one updated expectation.
+- `docs/REDACTION.md` has a new "Separator policy" section; limits and false positives were revised there and in the README. Decision 53 added. README test count updated to 405.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` after the code change, before touching tests | 13 failed, 370 passed: all 13 were expectations of the previous separator rules |
+| `npm test` after updating the tests | 10 test files, 405 tests, all passed |
+| New HTTP case (`4111.1111.1111.1111`, `5500 / 0000 / 0000 / 0004`, `123.45.6789`) | The mock and the audit `redactedMessage` received only tokens; none of the digit groups appear in the prompt, response, audit file or logs; decrypting `originalMessage` returns the message sent |
+| `npm run demo` | All 16 checks passed |
+| Timing on 10,000-character inputs (digit and three separators, digit and four separators, 12-digit dotted groups, punctuation only, full-width digits, near-SSN groups) | 0.0 to 26.3 ms each |
+| False positives run by hand | Redacted: `+52 1 (322) 123-4567` (13 digits), `192.168.100.200:8080`, `100 20 3000 units`. Left alone: `+52 (322) 123-4567`, `Order #1234-5678, total $1,299.99 on 2026-11-20`, `v1.2.3 build 20261120.1530` |
+
+**Not checked:**
+
+- Cards grouped with commas (`4111,1111,1111,1111`) are not detected, by decision.
+- Two values with only separators between them share one token; two SSNs joined by ` / ` are labelled as a card. Both values are hidden.
+- The Docker image was not rebuilt.
+- Nothing was pushed.

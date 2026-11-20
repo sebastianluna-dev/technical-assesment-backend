@@ -308,3 +308,19 @@ A normalized copy of the message (NFKC, or a table of look-alike characters) was
 Deliberately left out, and listed in `docs/REDACTION.md`: other Unicode spaces (U+202F, zero-width), digits of other scripts, the full-width at sign, and no-break spaces inside an SSN. Each would be one more character in a class; they were not added without a reported case because every addition also widens the false positives.
 
 Cost: letters of any alphabet can now belong to a local part, so text written without spaces directly before an address (as in Chinese or Japanese) is redacted with it, up to 64 characters.
+
+## 53. Separator policy for cards and SSNs
+
+Cards and SSNs used to accept one space, one no-break space or one hyphen between digits. They now accept a bounded run of separators, defined once (`SEPARATOR`, `MAX_SEPARATORS`, `SEPARATOR_RUN` in `src/services/redaction.ts`) and documented in `docs/REDACTION.md`.
+
+- **What a separator is.** Unicode punctuation, symbols, spaces of any width, the tab and invisible format characters (`\p{P}`, `\p{S}`, `\p{Zs}`, `\p{Cf}`, tab). Letters and line breaks are outside these classes, so numbers are not joined across words or lines.
+- **Comma and semicolon are excluded.** They are list punctuation. Without the exclusion `123-45-6789, 4111 1111 1111 1111` and every price list would be read as one number. The cost is that `4111,1111,1111,1111` is not detected.
+- **At most three in a row.** Enough for ` - ` and ` / `; a wider gap ends the number.
+- **Cards are found as numeric runs, then counted.** The pattern matches the longest run of 13 or more digits with optional separator runs between them, and `isCardCandidate` applies the count: 13 to 19 digits is a candidate; 20 or more written together is not, as before.
+- **A run of more than 19 digits with separators is redacted whole.** This replaces the previous behaviour, which redacted the first 19 digits and left the rest (`1234 5678 9012 3456 7890 1234` became `<REDACTED: CREDIT_CARD> 7890 1234`). With more separators accepted, such runs are more frequent (a card after an SSN, a card and its expiry date), and leaving a tail of real digits is worse than one token for two values.
+- **SSNs keep their shape.** Nine digits together, or 3-2-4 with a separator run between the groups. Separators between arbitrary digits are not accepted, which keeps other nine-digit groupings out.
+- **No normalization.** The patterns run on the original string, so positions are exact and the original message is unchanged. The detector list gained one optional field, `accepts`, used only by the card detector.
+
+Known costs, all documented: two values with only separators between them share one token and may be labelled as a card (two SSNs joined by ` / `); a date followed by a time and an IP address with a port are now redacted. The Unicode emails and full-width digits asked for in the same prompt were already in place (decision 52).
+
+A stricter alternative, requiring the same separator throughout a number, would avoid most merges. It was rejected because it stops detecting cards with mixed separators (`4111 1111-1111 1111`), which were detected before: a missed card is worse than a merged token.

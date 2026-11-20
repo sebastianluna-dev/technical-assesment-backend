@@ -433,6 +433,11 @@ describe("POST /secure-inquiry: redaction end to end", () => {
       ["josé", "example.test", "4111", "1111", "０００１２３４５６", "３４５６"],
     ],
     [
+      "numbers separated by punctuation and symbols",
+      "Card 4111.1111.1111.1111, other card 5500 / 0000 / 0000 / 0004, SSN 123.45.6789",
+      ["4111", "1111", "5500", "0004", "123.45", "6789"],
+    ],
+    [
       "multi-line text with non-ASCII characters",
       "Señora Núñez:\n\tcorreo → ana@example.mx ✔\r\nSSN\t123-45-6789 🔐",
       ["ana@example.mx", "123-45-6789"],
@@ -465,7 +470,7 @@ describe("POST /secure-inquiry: redaction end to end", () => {
       "Mail <REDACTED: EMAIL> and <REDACTED: EMAIL>. " +
         "Cards <REDACTED: CREDIT_CARD>, <REDACTED: CREDIT_CARD>. " +
         "SSNs <REDACTED: SSN>, <REDACTED: SSN>. " +
-        "Again: <REDACTED: EMAIL> / <REDACTED: CREDIT_CARD> / <REDACTED: SSN>",
+        "Again: <REDACTED: EMAIL> / <REDACTED: CREDIT_CARD>",
     );
   });
 

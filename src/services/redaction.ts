@@ -3,6 +3,8 @@ export type RedactionKind = "EMAIL" | "CREDIT_CARD" | "SSN";
 interface Detector {
   kind: RedactionKind;
   pattern: RegExp;
+  /** Optional extra rule a regex match must pass to become a candidate. */
+  accepts?: (match: string) => boolean;
 }
 
 interface Span {
@@ -50,37 +52,60 @@ const EMAIL_PATTERN = new RegExp(
  * DIGIT: an ASCII digit or its full-width form (０ to ９, U+FF10 to U+FF19),
  * as produced by East Asian input methods. Both are one UTF-16 unit.
  *
- * CARD_SEPARATOR: one space, one no-break space (U+00A0, common in text
- * pasted from web pages and documents) or one hyphen.
+ * SEPARATOR: one character that may sit between two digits of the same
+ * number: any punctuation mark or symbol, a space of any width, a tab or an
+ * invisible format character such as the zero-width space. Three things are
+ * never separators, so they always end a number:
+ *
+ * - letters, so numbers are not joined across words;
+ * - line breaks, so numbers are not joined across lines;
+ * - the comma and the semicolon, which separate the items of a list.
+ *
+ * SEPARATOR_RUN: one to MAX_SEPARATORS separators in a row, enough for
+ * " - " or " / " and too short to bridge a wider gap.
  */
 const DIGIT = String.raw`[0-9０-９]`;
-const CARD_SEPARATOR = String.raw`[  -]`;
+const SEPARATOR = String.raw`(?![,;])[\p{P}\p{S}\p{Zs}\p{Cf}\t]`;
+const MAX_SEPARATORS = 3;
+const SEPARATOR_RUN = `(?:${SEPARATOR}){1,${MAX_SEPARATORS}}`;
 
-const CREDIT_CARD_PATTERN = new RegExp(
-  `(?<!${DIGIT})${DIGIT}(?:${CARD_SEPARATOR}?${DIGIT}){12,18}(?!${DIGIT})`,
-  "g",
+/**
+ * A numeric run: 13 or more digits, each pair optionally split by one
+ * separator run. The match is greedy, so it is the longest such run.
+ */
+const NUMERIC_RUN_PATTERN = new RegExp(
+  `(?<!${DIGIT})${DIGIT}(?:(?:${SEPARATOR_RUN})?${DIGIT}){12,}`,
+  "gu",
 );
 
+const MAX_CARD_DIGITS = 19;
+const DIGIT_PATTERN = new RegExp(DIGIT, "g");
+
+/**
+ * A numeric run is a card candidate when it has 13 to 19 digits. A longer
+ * run is also redacted when it contains separators: it holds several numbers
+ * and there is no safe way to tell where one ends, so none of it is left in
+ * the clear. Twenty or more digits written together are not a card.
+ */
+function isCardCandidate(run: string): boolean {
+  const digitCount = run.match(DIGIT_PATTERN)?.length ?? 0;
+  const hasSeparators = digitCount < run.length;
+  return digitCount <= MAX_CARD_DIGITS || hasSeparators;
+}
+
+/** Nine digits together, or grouped 3-2-4 with a separator run between groups. */
 const SSN_PATTERN = new RegExp(
-  `(?<!${DIGIT})(?:${DIGIT}{3}-${DIGIT}{2}-${DIGIT}{4}|${DIGIT}{9})(?!${DIGIT})`,
-  "g",
+  `(?<!${DIGIT})(?:${DIGIT}{3}${SEPARATOR_RUN}${DIGIT}{2}${SEPARATOR_RUN}${DIGIT}{4}|${DIGIT}{9})(?!${DIGIT})`,
+  "gu",
 );
 
 /**
  * Detectors in priority order. The order only matters as a tie-breaker when
  * two overlapping candidates have the same length.
- *
- * EMAIL: see EMAIL_PATTERN above.
- *
- * CREDIT_CARD: 13 to 19 digits, each optionally preceded by one separator,
- * not directly attached to another digit. No Luhn check on purpose.
- *
- * SSN: XXX-XX-XXXX or exactly nine digits, not directly attached to another
- * digit.
  */
 const DETECTORS: readonly Detector[] = [
   { kind: "EMAIL", pattern: EMAIL_PATTERN },
-  { kind: "CREDIT_CARD", pattern: CREDIT_CARD_PATTERN },
+  { kind: "CREDIT_CARD", pattern: NUMERIC_RUN_PATTERN, accepts: isCardCandidate },
   { kind: "SSN", pattern: SSN_PATTERN },
 ];
 
@@ -92,8 +117,9 @@ const PRIORITY: Record<RedactionKind, number> = {
 
 function findCandidates(message: string): Span[] {
   const spans: Span[] = [];
-  for (const { kind, pattern } of DETECTORS) {
+  for (const { kind, pattern, accepts } of DETECTORS) {
     for (const match of message.matchAll(pattern)) {
+      if (accepts && !accepts(match[0])) continue;
       spans.push({ kind, start: match.index, end: match.index + match[0].length });
     }
   }

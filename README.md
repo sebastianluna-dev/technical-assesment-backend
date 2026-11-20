@@ -297,7 +297,7 @@ npm test
 npm run typecheck
 ```
 
-383 tests in 10 files, about two seconds.
+405 tests in 10 files, about two seconds.
 
 | File | Covers |
 | --- | --- |
@@ -369,22 +369,23 @@ Redaction uses three regular expressions. It finds data that looks like an email
 | Type | Detected |
 | --- | --- |
 | Email | `local@domain.tld`, including `+` and `.` aliases, apostrophes (`o'connor@…`), quoted local parts (`"ana garcia"@…`) and non-ASCII letters (`josé@…`) |
-| Credit card | 13 to 19 digits, together or separated by single spaces, no-break spaces (U+00A0) or hyphens. ASCII or full-width digits. No Luhn check. |
-| SSN | `XXX-XX-XXXX`, or exactly nine consecutive digits. ASCII or full-width digits (`０００１２３４５６`). |
+| Credit card | 13 to 19 digits, together or with up to three punctuation marks, symbols or spaces between digits (`4111.1111.1111.1111`, `4111 - 1111 - 1111 - 1111`). ASCII or full-width digits. No Luhn check. |
+| SSN | Nine consecutive digits, or the grouping 3-2-4 with the same separators (`123-45-6789`, `123 45 6789`, `123.45.6789`). ASCII or full-width digits (`０００１２３４５６`). |
 
 **It misses:**
 
 - Any other kind of personal data: names, addresses, phone numbers, dates of birth, passport or bank account numbers.
-- Obfuscated values: `john at example dot com`, card digits separated by dots, slashes, line breaks or more than one space, numbers written as words.
-- SSNs in other formats, such as `123 45 6789`.
-- Digits of other scripts (Arabic-Indic, Devanagari), and Unicode spaces other than U+00A0 between card digits.
+- Obfuscated values: `john at example dot com`, card digits separated by commas, line breaks, words or more than three separator characters, numbers written as words.
+- SSNs in other groupings, such as `12-345-6789`.
+- Digits of other scripts (Arabic-Indic, Devanagari).
 - Data split across several messages.
 
 **It over-redacts:**
 
 - Any 13 to 19 digits count as a card: millisecond timestamps, ISBN-13 codes, tracking numbers, long order IDs.
 - Any standalone nine digits count as an SSN: order numbers, routing numbers.
-- Short numbers separated only by spaces or hyphens can add up to a card: `2024 2025 2026 2027` is redacted.
+- Short numbers with only punctuation, symbols or spaces between them add up to a card: `2024 2025 2026 2027`, `2026-11-20 10:30:15` and `192.168.100.200:8080` are redacted. Letters, line breaks, commas and semicolons keep numbers apart.
+- Two values with only separators between them come out as one token: `123-45-6789 / 987-65-4321` becomes a single `<REDACTED: CREDIT_CARD>`.
 
 This direction is deliberate: hiding a harmless number costs less than leaking a real one. But the result is that **a redacted message is not guaranteed to be free of personal data**, and the redacted text is stored readable in the audit file and sent to the AI. Treat it as reduced-risk text, not as anonymous text.
 
