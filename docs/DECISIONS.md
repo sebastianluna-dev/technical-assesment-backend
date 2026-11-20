@@ -117,3 +117,35 @@ The IV must be 12 bytes and the tag 16 bytes, and all fields must be strict base
 ## 27. No additional authenticated data
 
 The ciphertext is not bound to its audit record (for example by using `requestId` as AAD). Someone who can edit the audit file could move a whole valid encrypted payload from one record to another and it would still decrypt. Modifying a payload is detected; swapping payloads is not.
+
+## 28. Audit records live in one JSON file behind a repository
+
+`createAuditRepository(filePath)` in `src/repositories/auditRepository.ts` exposes `append(record)` and `findAll()`. The file is `{ "version": 1, "records": [...] }`. Each record has `requestId`, `userId`, `timestamp` (ISO 8601), `outcome`, `originalMessage` (the `{ ciphertext, iv, tag }` payload) and `redactedMessage` as readable text. The `version` field makes a file from another format detectable instead of misread.
+
+The repository receives the original message already encrypted. It has no access to the key and never sees the original text, so it cannot write or log it. It copies only the six known fields to disk, so an extra property on the object passed in is dropped.
+
+`outcome` is any non-empty string for now. The allowed values will be fixed when an endpoint defines them.
+
+## 29. Writes are serialized with one queue per file
+
+Appending is read, add, write. Two appends running together would both read the same records and the second write would erase the first. Each append is chained onto a promise queue keyed by the resolved file path, shared by every repository instance in the process, so cycles run one at a time and records keep the order of the calls. A failed write rejects its own caller and does not block the queue.
+
+Removing the queue makes four of the concurrency tests fail, which was checked once by hand.
+
+**Limit:** the queue is in memory. Two processes writing the same file (for example two server instances) are not coordinated and can lose records. That needs a lock file or a database.
+
+## 30. Atomic replacement: temporary file, `fsync`, `rename`
+
+New contents go to a uniquely named temporary file in the same directory (same filesystem, so `rename` is atomic), are flushed with `fsync`, and the file is renamed over the target. A reader gets the complete old file or the complete new one, and a crash mid-write leaves the old file intact. The temporary file is removed if anything fails. Files are created with mode `0600`.
+
+**Limits:** the directory itself is not flushed after the rename, so after a power loss the last append can be missing (the file is still valid). Every append rewrites the whole file, so cost grows with the number of records; this is acceptable for an assessment-sized log and wrong for a large one.
+
+## 31. Corrupted files are reported, never reset
+
+A missing file means "no records yet". A file that exists but is not valid JSON, has the wrong structure or contains an invalid record throws `AuditFileCorruptedError` from both `findAll` and `append`, and the file is left byte for byte as found. An empty file counts as corrupted, because a truncated write looks the same. Recovery is a manual decision: starting a new file automatically would destroy the evidence an audit log exists to keep.
+
+The error names the file path and the kind of problem (including the index and field of a bad record). It never includes file contents, and the JSON parser's own message is discarded because it can quote them.
+
+## 32. No logging in the encryption service or the repository
+
+Neither module calls `console` or any logger; they report through return values and typed errors whose messages carry no message text and no key material. The only `console` calls in `src` are in `server.ts` (startup, shutdown, configuration error message). Tests assert that the repository writes nothing to the console and that error messages do not contain the original text or the key.

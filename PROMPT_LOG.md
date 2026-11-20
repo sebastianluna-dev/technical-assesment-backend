@@ -156,3 +156,33 @@ Entries are added after each task. Dates are local machine dates.
 | --- | --- |
 | `npm run typecheck` | Passed, no errors |
 | `npm test` | 4 test files, 103 tests, all passed |
+
+### Step 3: audit repository
+
+- Added `src/repositories/auditRepository.ts`: `createAuditRepository(filePath)` with `append(record)` and `findAll()`, plus `AuditFileCorruptedError`.
+- File format: `{ "version": 1, "records": [...] }`. Each record holds `requestId`, `userId`, `timestamp`, `outcome`, `originalMessage` (encrypted `{ ciphertext, iv, tag }`) and `redactedMessage` (plaintext).
+- Appends run one at a time through an in-memory queue per file path. Each one reads the existing records, adds the new one, writes a temporary file, calls `fsync` and renames it over the target.
+- A missing file is treated as empty. An invalid file (bad JSON, wrong structure, invalid record, empty file) throws `AuditFileCorruptedError` and is not modified.
+- The repository has no logging calls and never receives the original text or the key.
+- Removed `src/repositories/.gitkeep`.
+- Added `tests/auditRepository.test.ts` (29 tests): storing and reading, encrypted original and readable redacted text on disk, decryption and tamper detection of a stored record, existing records preserved, 100 concurrent appends, 90 appends across three instances, reads during writes, no leftover temporary files, recovery after a failed write, eight kinds of corrupted file, invalid input records and no console output.
+- Added decisions 28 to 32 and updated `README.md`.
+- Not wired into the application: no route encrypts or writes audit records yet.
+
+**Checks performed (step 3):**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 5 test files, 132 tests, all passed; run 5 more times in a row, all passed |
+| Temporarily removed the write queue and ran the repository tests | 4 concurrency tests failed, as expected; the file was restored and `git diff` showed no change |
+| `grep` for `console.` in `src` | Only `src/server.ts` |
+| `npm run build` | Passed |
+
+**Not checked:**
+
+- Two processes writing the same audit file. The queue is per process, so this case is not protected and was not tested.
+- Behaviour on a crash or power loss in the middle of a write. Atomic replacement was tested only through concurrent reads.
+- File permissions (`0600`) were asserted on macOS only.
+- No linter or formatter is configured, so none was run.
+- Nothing was pushed. The repository has no remote.
