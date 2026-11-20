@@ -4,7 +4,7 @@
 
 | Kind | Token | Detected |
 | --- | --- | --- |
-| Email | `<REDACTED: EMAIL>` | `local@domain.tld`, including plus and dot aliases such as `john.doe+billing@mail.example.co.uk` |
+| Email | `<REDACTED: EMAIL>` | `local@domain.tld`, including plus and dot aliases such as `john.doe+billing@mail.example.co.uk`, apostrophes (`o'connor@example.test`) and quoted local parts with spaces (`"ana garcia"@example.test`, quotes included) |
 | Credit card candidate | `<REDACTED: CREDIT_CARD>` | 13 to 19 digits, written together or with a single space or hyphen between digits, in any grouping |
 | SSN | `<REDACTED: SSN>` | `XXX-XX-XXXX`, or exactly nine consecutive digits |
 
@@ -26,9 +26,10 @@
 
 - Obfuscated addresses: `john at example dot com`, `john @ example.com`.
 - Non-ASCII characters in the local part or the domain: `josé@example.com`, `john@münchen.de`. Punycode domains (`xn--...`) are detected.
-- Quoted local parts (`"a b"@example.com`) and IP-literal domains (`user@[192.168.0.1]`).
+- IP-literal domains: `user@[192.168.0.1]`.
+- Quoted local parts that span lines or contain an escaped quote. `"a\"b"@example.com` becomes `"a\<REDACTED: EMAIL>`. A quoted part mixed with an unquoted one (`"ana garcia".x@example.com`) is only redacted from the last dot on.
 - Domains with no dot: `john@localhost`.
-- Characters outside letters, digits and `. _ % + -` cut the local part. `o'brien@example.com` becomes `o'<REDACTED: EMAIL>`: the address is hidden but `o'` stays.
+- In an unquoted local part, characters outside letters, digits and `. _ % + - '` cut it. `a!b@example.com` becomes `a!<REDACTED: EMAIL>`: the address is hidden but `a!` stays. The other symbols an address may legally carry (`! # $ & * / = ? ^ { | } ~` and the backtick) are left out on purpose, because they would also swallow text such as `email=` or a URL path in front of an address.
 - A local part longer than 64 characters: the last 64 characters and the domain are redacted, the start stays.
 
 ### Credit cards

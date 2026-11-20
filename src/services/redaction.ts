@@ -12,13 +12,37 @@ interface Span {
 }
 
 /**
+ * EMAIL, built from named parts. The local part (before the @) has two forms:
+ *
+ * - Unquoted: up to 64 letters, digits and . _ % + - ' (plus and dot aliases,
+ *   and names such as o'connor). It cannot start with a dot or an apostrophe,
+ *   so a quote mark placed around an address stays in the text. The length
+ *   bound keeps matching linear on long inputs without an @.
+ * - Quoted: anything between two double quotes on one line, which is how an
+ *   address carries spaces: "ana garcia"@example.test. The quotes are part of
+ *   the address and are redacted with it. No length bound is needed (the scan
+ *   stops at the next quote) and none is wanted: a bound would let redacting
+ *   a card inside the quotes shorten the text into a new match on a second
+ *   pass.
+ *
+ * The domain is one or more labels and a final label that starts with a
+ * letter.
+ */
+const UNQUOTED_LOCAL_PART = String.raw`[a-z0-9_%+-][a-z0-9._%+'-]{0,63}`;
+const QUOTED_LOCAL_PART = String.raw`"[^"\r\n]+"`;
+const DOMAIN_LABEL = String.raw`[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`;
+const TOP_LEVEL_LABEL = String.raw`[a-z][a-z0-9-]{0,61}[a-z0-9]`;
+
+const EMAIL_PATTERN = new RegExp(
+  `(?:${QUOTED_LOCAL_PART}|${UNQUOTED_LOCAL_PART})@(?:${DOMAIN_LABEL}\\.)+${TOP_LEVEL_LABEL}`,
+  "gi",
+);
+
+/**
  * Detectors in priority order. The order only matters as a tie-breaker when
  * two overlapping candidates have the same length.
  *
- * EMAIL: a local part of up to 64 characters (letters, digits and . _ % + -,
- * which covers plus and dot aliases), an @, one or more domain labels and a
- * final label that starts with a letter. The length bound keeps matching
- * linear on long inputs without an @.
+ * EMAIL: see EMAIL_PATTERN above.
  *
  * CREDIT_CARD: 13 to 19 digits, each optionally preceded by one space or one
  * hyphen, not directly attached to another digit. No Luhn check on purpose.
@@ -29,8 +53,7 @@ interface Span {
 const DETECTORS: readonly Detector[] = [
   {
     kind: "EMAIL",
-    pattern:
-      /[a-z0-9_%+-][a-z0-9._%+-]{0,63}@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]/gi,
+    pattern: EMAIL_PATTERN,
   },
   {
     kind: "CREDIT_CARD",

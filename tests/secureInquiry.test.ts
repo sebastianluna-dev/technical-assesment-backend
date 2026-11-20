@@ -423,6 +423,11 @@ describe("POST /secure-inquiry: redaction end to end", () => {
       ["a@example.com", "123-45-6789", "4111"],
     ],
     [
+      "emails with a quoted local part or an apostrophe",
+      `Write to "ana garcia"@example.test or o'connor@example.test`,
+      ["ana garcia", "garcia", "o'connor", "connor", "example.test"],
+    ],
+    [
       "multi-line text with non-ASCII characters",
       "Señora Núñez:\n\tcorreo → ana@example.mx ✔\r\nSSN\t123-45-6789 🔐",
       ["ana@example.mx", "123-45-6789"],

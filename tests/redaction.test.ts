@@ -25,6 +25,25 @@ describe("redactMessage: emails", () => {
     expect(redactMessage("<john@example.com>")).toBe(`<${EMAIL}>`);
   });
 
+  it.each([
+    '"ana garcia"@example.test',
+    "o'connor@example.test",
+    '"4111 1111 1111 1111"@example.test',
+    '"123-45-6789 ana"@example.test',
+  ])("redacts %s completely", (email) => {
+    expect(redactMessage(email)).toBe(EMAIL);
+    expect(redactMessage(`Write to ${email}, please.`)).toBe(`Write to ${EMAIL}, please.`);
+    expect(redactMessage(redactMessage(email))).toBe(EMAIL);
+  });
+
+  it("keeps quote marks that only surround an address", () => {
+    expect(redactMessage("'ana@example.test'")).toBe(`'${EMAIL}'`);
+    expect(redactMessage('"ana@example.test"')).toBe(`"${EMAIL}"`);
+    expect(redactMessage('She said "hello" to ana@example.test')).toBe(
+      `She said "hello" to ${EMAIL}`,
+    );
+  });
+
   it.each(["john@", "@example.com", "john@localhost", "a @ b.com", "3 @ 5.00"])(
     "leaves %s alone",
     (text) => {

@@ -297,7 +297,7 @@ npm test
 npm run typecheck
 ```
 
-369 tests in 10 files, about two seconds.
+375 tests in 10 files, about two seconds.
 
 | File | Covers |
 | --- | --- |
@@ -368,7 +368,7 @@ Redaction uses three regular expressions. It finds data that looks like an email
 
 | Type | Detected |
 | --- | --- |
-| Email | `local@domain.tld`, including `+` and `.` aliases |
+| Email | `local@domain.tld`, including `+` and `.` aliases, apostrophes (`o'connor@…`) and quoted local parts (`"ana garcia"@…`) |
 | Credit card | 13 to 19 digits, together or separated by single spaces or hyphens. No Luhn check. |
 | SSN | `XXX-XX-XXXX`, or exactly nine consecutive digits |
 

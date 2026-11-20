@@ -358,3 +358,38 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 - The README's response examples for the success case reuse output captured in entry 4; the request id, timestamp and ciphertext differ on every run.
 - No linter or formatter is configured, so none was run.
 - Nothing was pushed. The repository has no remote.
+
+---
+
+## 7. Fix email detection for quoted local parts and apostrophes
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Fix email detection in src/services/redaction.ts. Currently, "ana garcia"@example.test remains visible, and o'connor@example.test is only partially redacted. Both should be fully replaced with <REDACTED: EMAIL>. Preserve the original message for encryption and keep overlap handling. Use a readable solution and add only the necessary regression cases to the existing tests. Verify that these addresses cannot reach the mock or the redactedMessage audit field unredacted.
+
+**Outcome:**
+
+- `src/services/redaction.ts`: the email pattern is built from named parts and accepts two local-part forms: unquoted (now with an apostrophe after the first character) and quoted (text between double quotes on one line). Overlap resolution and the rest of the function are unchanged.
+- The original message is untouched: `redactMessage` still returns a new string and the service still encrypts the request's own `message`.
+- `tests/redaction.test.ts`: 5 new tests. Four addresses (the two reported, plus a card and an SSN inside a quoted local part) must become exactly one email token, alone and inside a sentence, and stay the same on a second pass. One test checks that quote marks which only surround an address are kept.
+- `tests/secureInquiry.test.ts`: 1 new case in the existing end-to-end table, sending both addresses through `POST /secure-inquiry`.
+- `docs/REDACTION.md` and the README table updated; decision 51 added. README test count updated to 375.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 10 test files, 375 tests, all passed |
+| New HTTP case | The mock received `Write to <REDACTED: EMAIL> or <REDACTED: EMAIL>`; the audit `redactedMessage` is the same text; the prompt, response, audit file and logs contain none of `ana garcia`, `garcia`, `o'connor`, `connor`, `example.test`; decrypting `originalMessage` returns the message sent |
+| `npm run demo` | All 16 checks passed |
+| Timing on 10,000-character inputs (only quotes, alternating quote and letter, alternating letter and apostrophe, one quote followed by letters) | 0.1 to 2.2 ms each |
+
+**Not checked:**
+
+- The first run of the new HTTP case failed because of the test, not the code: its list of forbidden strings included a bare `"`, which every JSON file contains. The list was corrected.
+- Quoted local parts with escaped quotes, or mixed with an unquoted part, are still only partly redacted (documented in `docs/REDACTION.md`).
+- The Docker image was not rebuilt.
+- Nothing was pushed.

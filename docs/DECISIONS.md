@@ -284,3 +284,13 @@ The mock already supported a delay; the setting exposes it (default 0) so the di
 A demo driving `npm start` from outside was rejected because the server has no way to change the mock's behaviour while running, and adding one (a magic word in the message, a control endpoint) would put a test hook in production code. Restarting the server to change the failure rate also resets the breaker, so it could not show recovery.
 
 The script generates its own key, writes to a temporary directory it deletes, uses only synthetic data, checks every step and exits with code 1 if a check fails. Its open period is 3 seconds instead of 30 so the recovery step is short.
+
+## 51. Emails with an apostrophe or a quoted local part are redacted whole
+
+Two addresses got past the email pattern: `"ana garcia"@example.test` was not detected at all (the character before the `@` is a quote), and `o'connor@example.test` left `o'` in the text.
+
+- The unquoted local part now accepts an apostrophe anywhere except the first character. Keeping it out of the first position means `'ana@example.test'` still keeps both of its quote marks.
+- A second form was added: any text between two double quotes on one line, directly followed by `@domain`. The quotes belong to the address and are redacted with it.
+- The quoted form has no length bound. The scan stops at the next quote, so matching stays linear (10,000 quotes take under 1 ms). A bound would also break idempotency: redacting a card inside a long quoted part could shorten it under the bound and create a new email match on the second pass.
+- The pattern is now assembled from named parts (`QUOTED_LOCAL_PART`, `UNQUOTED_LOCAL_PART`, `DOMAIN_LABEL`, `TOP_LEVEL_LABEL`) instead of one long literal. Overlap resolution is unchanged; a card or SSN inside a quoted local part is merged into the single email token.
+- The other symbols an address may legally carry (`! # $ & * / = ? ^ { | } ~` and the backtick) were not added. They would make the match swallow text in front of an address, such as `email=` or a URL path. Escaped quotes inside a quoted part are not supported either. Both limits are listed in `docs/REDACTION.md`.
