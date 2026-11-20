@@ -31,6 +31,10 @@ cp .env.example .env   # optional; defaults are NODE_ENV=development and PORT=30
 | --- | --- | --- |
 | GET | `/health` | `200` `{"status":"ok"}` |
 
+## Redaction
+
+`redactMessage(message)` in `src/services/redaction.ts` is a pure function that replaces emails, credit card candidates and SSNs with `<REDACTED: EMAIL>`, `<REDACTED: CREDIT_CARD>` and `<REDACTED: SSN>`. It is not exposed through any endpoint yet. Detection limits and false positives: [docs/REDACTION.md](docs/REDACTION.md).
+
 ## Layout
 
 ```
@@ -40,9 +44,10 @@ src/
   config/          environment loading and validation
   routes/          route definitions
   middleware/      (empty for now)
-  services/        (empty for now)
+  services/        redaction.ts: redactMessage()
   repositories/    (empty for now)
 tests/             Vitest + Supertest tests
 docs/DECISIONS.md  implementation decisions
+docs/REDACTION.md  redaction rules, limits and false positives
 PROMPT_LOG.md      prompts given to the AI assistant and their outcomes
 ```

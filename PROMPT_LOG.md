@@ -63,3 +63,47 @@ Entries are added after each task. Dates are local machine dates.
 - Restart-on-change in `npm run dev` was not exercised; the server was only started once and queried.
 - No `.env` file was created, so loading values from one was not tested. `tsx` printed ".env not found. Continuing without it."
 - Nothing was pushed. The repository has no remote.
+
+---
+
+## 2. Pure `redactMessage` function
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Implement a pure redactMessage function that replaces emails with <REDACTED: EMAIL>, credit card candidates with <REDACTED: CREDIT_CARD>, and SSNs with <REDACTED: SSN>. Support email aliases, card numbers containing 13–19 digits with spaces or hyphens, and SSNs written as XXX-XX-XXXX or nine consecutive digits. Redact card-like numbers even when they fail Luhn validation. Resolve overlapping matches before replacing them so an SSN match cannot partially redact a card or email. Preserve surrounding text and punctuation, replace every occurrence and keep repeated sanitization idempotent. Add focused tests and document detection limits and possible false positives
+
+**Outcome:**
+
+### Step 1: function and tests
+
+- Added `src/services/redaction.ts`, which exports `redactMessage(message: string): string`. It has no I/O and no state. It is not connected to any route.
+- Detection uses one regular expression per kind. No Luhn check and no SSN range check.
+- Candidates of all kinds are found on the original text, overlapping candidates are merged into one span labelled with the kind of the longest candidate, and the text is replaced once.
+- Added `tests/redaction.test.ts` with 57 tests: emails (aliases, punctuation, non-matches), cards (13/16/19 digits, spaces, hyphens, mixed, failing Luhn, non-matches), SSNs (both formats, non-matches), overlaps, whole messages and idempotency.
+- Removed `src/services/.gitkeep`, since the folder now has a file.
+- Added decisions 15 to 20 to `docs/DECISIONS.md`.
+
+### Step 2: limits and false positives
+
+- Added `docs/REDACTION.md` with the rules, the data that is not detected and the harmless data that is redacted. Every example in it was run against the function.
+- Added a "Redaction" section to `README.md`.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 3 test files, 63 tests, all passed (57 new) |
+| One-off fuzz script (not committed): 200,000 strings built from cards, SSNs, emails, tokens and separators, checking that redacting twice equals redacting once | 0 failures |
+| One-off run of the examples used in `docs/REDACTION.md` | Outputs match the document |
+| One-off timing on six 200,000-character worst-case strings | Each under 50 ms on the local machine |
+| `npm run build` | Passed |
+
+**Not checked:**
+
+- The fuzz, example and timing scripts are not part of the repository or of `npm test`.
+- No linter or formatter is configured, so none was run.
+- The function was not tested through HTTP, because no endpoint uses it.
+- Nothing was pushed. The repository has no remote.
