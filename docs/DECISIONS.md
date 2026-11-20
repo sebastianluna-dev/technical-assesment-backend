@@ -99,3 +99,21 @@ Error messages state the problem and the decoded length, never the value. `serve
 ## 23. The audit file path is configuration
 
 `AUDIT_LOG_PATH` defaults to `data/audit-log.json`. `data/` is ignored by Git.
+
+## 24. AES-256-GCM through a factory bound to the key
+
+`createEncryptionService(key)` in `src/services/encryption.ts` returns `encrypt(plaintext)` and `decrypt(payload)`. The key is passed in once, copied, and kept in a closure: callers of `encrypt` never handle it, and tests build a service with their own random key instead of touching the environment.
+
+## 25. Random 12-byte IV per encryption, 16-byte tag, three base64 fields
+
+Each `encrypt` call takes 12 bytes from `crypto.randomBytes`. Twelve bytes is the IV size GCM is designed for; reusing an IV with the same key breaks GCM, so the IV is never derived from the content or a counter kept in memory. The result is `{ ciphertext, iv, tag }`, each base64, kept as separate fields rather than one concatenated string so the stored format needs no parsing rules.
+
+With random IVs the usual guidance is to stay well under 2^32 encryptions per key. That is far beyond this project, and there is no key rotation or key identifier in the payload.
+
+## 26. Decryption rejects anything that is not exactly what `encrypt` produces
+
+The IV must be 12 bytes and the tag 16 bytes, and all fields must be strict base64. `createDecipheriv` is called with `authTagLength: 16`, so a truncated tag is refused instead of being accepted with weaker authentication. Every failure is a `DecryptionError` whose message has no payload, plaintext or key material. Modified data and a wrong key give the same message on purpose: GCM cannot tell them apart.
+
+## 27. No additional authenticated data
+
+The ciphertext is not bound to its audit record (for example by using `requestId` as AAD). Someone who can edit the audit file could move a whole valid encrypted payload from one record to another and it would still decrypt. Modifying a payload is detected; swapping payloads is not.

@@ -140,3 +140,19 @@ Entries are added after each task. Dates are local machine dates.
 | Built server with a 16-byte key | Printed "…decodes to 16 bytes, expected 32", exit code 1 |
 | `PORT=3461 npm start` with the local `.env`, then `curl /health` | `{"status":"ok"}` |
 | `git check-ignore .env` | `.env` is ignored |
+
+### Step 2: AES-256-GCM service
+
+- Added `src/services/encryption.ts`: `createEncryptionService(key)` returns `encrypt(plaintext)` and `decrypt(payload)`, using `node:crypto` only.
+- `encrypt` generates a new 12-byte IV with `randomBytes` on every call and returns `{ ciphertext, iv, tag }` as base64, with the 16-byte GCM tag.
+- `decrypt` requires strict base64, a 12-byte IV and a 16-byte tag, and throws `DecryptionError` on any failure. The error carries no plaintext or key.
+- The service has no logging calls.
+- Added `tests/encryption.test.ts` (25 tests): output format, 500 encryptions with 500 distinct IVs, round trips (non-ASCII, empty, 100,000 characters, through JSON), and tampering with the ciphertext, IV and tag, truncated ciphertext and tag, fields swapped between messages, non-base64 fields, a different key, and invalid key sizes.
+- Added decisions 24 to 27.
+
+**Checks performed (step 2):**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 4 test files, 103 tests, all passed |
