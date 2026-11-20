@@ -428,6 +428,11 @@ describe("POST /secure-inquiry: redaction end to end", () => {
       ["ana garcia", "garcia", "o'connor", "connor", "example.test"],
     ],
     [
+      "accented email, no-break spaces in a card and a full-width SSN",
+      "Soy josé@example.test, tarjeta 4111\u00A01111\u00A01111\u00A01111, SSN ０００１２３４５６",
+      ["josé", "example.test", "4111", "1111", "０００１２３４５６", "３４５６"],
+    ],
+    [
       "multi-line text with non-ASCII characters",
       "Señora Núñez:\n\tcorreo → ana@example.mx ✔\r\nSSN\t123-45-6789 🔐",
       ["ana@example.mx", "123-45-6789"],

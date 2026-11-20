@@ -393,3 +393,37 @@ Three failures were wrong expectations in new tests: two redaction cases that de
 - Quoted local parts with escaped quotes, or mixed with an unquoted part, are still only partly redacted (documented in `docs/REDACTION.md`).
 - The Docker image was not rebuilt.
 - Nothing was pushed.
+
+---
+
+## 8. Accented emails, no-break spaces in cards and full-width digits
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Address the remaining sanitizer gaps: josé@example.test, credit card numbers separated by nonbreaking spaces U+00A0, and sequences of nine full-width digits such as ０００１２３４５６. Make localized changes while preserving the original message and accurate replacement positions. Reuse the existing tests and document the supported formats. Avoid building a generic normalization system
+
+**Outcome:**
+
+- `src/services/redaction.ts`: only the pattern definitions changed. Email letters and digits are any Unicode letter or number; the card separator also accepts U+00A0; a named `DIGIT` class (ASCII or full-width) is used by the card and SSN patterns. Candidate collection, overlap resolution and replacement are untouched, and there is no normalized copy of the message.
+- Beyond the three reported values, the same classes also cover internationalized domains (`john@münchen.example`), decomposed accents, cards in full-width digits and the dashed SSN in full-width digits.
+- `tests/redaction.test.ts`: 7 new tests in the existing file (accented and internationalized emails, cards with no-break spaces or full-width digits, full-width SSNs, digit boundaries with mixed digits, and one mixed message with an emoji that checks every replacement lands at its own position and that a second pass changes nothing). The existing look-alike test no longer lists the full-width card as undetected.
+- `tests/secureInquiry.test.ts`: 1 new case in the end-to-end table with the three reported values.
+- `docs/REDACTION.md` and the README list the supported formats and the remaining limits; decision 52 added. README test count updated to 383.
+
+**Checks performed:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed, no errors |
+| `npm test` | 10 test files, 383 tests, all passed on the first run |
+| New HTTP case | The mock and the audit `redactedMessage` received only tokens; the prompt, response, audit file and logs contain none of `josé`, `example.test`, `4111`, `1111`, `０００１２３４５６`, `３４５６`; decrypting `originalMessage` returns the message sent |
+| `npm run demo` | All 16 checks passed |
+| Timing on 10,000-character inputs (only accented letters, only full-width digits, digit and no-break space alternating, letter and dot alternating, repeated `é@a.`) | 0.1 to 20.3 ms each; the slowest is 10,000 full-width digits |
+
+**Not checked:**
+
+- Still not redacted, by decision: `john＠example.com` (full-width at sign), a card grouped with U+202F, `123 45 6789` with spaces or no-break spaces, digits of other scripts. These were run and are listed in `docs/REDACTION.md`.
+- The Docker image was not rebuilt.
+- Nothing was pushed.

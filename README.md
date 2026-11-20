@@ -297,7 +297,7 @@ npm test
 npm run typecheck
 ```
 
-375 tests in 10 files, about two seconds.
+383 tests in 10 files, about two seconds.
 
 | File | Covers |
 | --- | --- |
@@ -368,16 +368,16 @@ Redaction uses three regular expressions. It finds data that looks like an email
 
 | Type | Detected |
 | --- | --- |
-| Email | `local@domain.tld`, including `+` and `.` aliases, apostrophes (`o'connor@…`) and quoted local parts (`"ana garcia"@…`) |
-| Credit card | 13 to 19 digits, together or separated by single spaces or hyphens. No Luhn check. |
-| SSN | `XXX-XX-XXXX`, or exactly nine consecutive digits |
+| Email | `local@domain.tld`, including `+` and `.` aliases, apostrophes (`o'connor@…`), quoted local parts (`"ana garcia"@…`) and non-ASCII letters (`josé@…`) |
+| Credit card | 13 to 19 digits, together or separated by single spaces, no-break spaces (U+00A0) or hyphens. ASCII or full-width digits. No Luhn check. |
+| SSN | `XXX-XX-XXXX`, or exactly nine consecutive digits. ASCII or full-width digits (`０００１２３４５６`). |
 
 **It misses:**
 
 - Any other kind of personal data: names, addresses, phone numbers, dates of birth, passport or bank account numbers.
 - Obfuscated values: `john at example dot com`, card digits separated by dots, slashes, line breaks or more than one space, numbers written as words.
 - SSNs in other formats, such as `123 45 6789`.
-- Emails with non-ASCII characters (`josé@example.com`), and digits that are not ASCII (full-width `４１１１…`).
+- Digits of other scripts (Arabic-Indic, Devanagari), and Unicode spaces other than U+00A0 between card digits.
 - Data split across several messages.
 
 **It over-redacts:**

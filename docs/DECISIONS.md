@@ -294,3 +294,17 @@ Two addresses got past the email pattern: `"ana garcia"@example.test` was not de
 - The quoted form has no length bound. The scan stops at the next quote, so matching stays linear (10,000 quotes take under 1 ms). A bound would also break idempotency: redacting a card inside a long quoted part could shorten it under the bound and create a new email match on the second pass.
 - The pattern is now assembled from named parts (`QUOTED_LOCAL_PART`, `UNQUOTED_LOCAL_PART`, `DOMAIN_LABEL`, `TOP_LEVEL_LABEL`) instead of one long literal. Overlap resolution is unchanged; a card or SSN inside a quoted local part is merged into the single email token.
 - The other symbols an address may legally carry (`! # $ & * / = ? ^ { | } ~` and the backtick) were not added. They would make the match swallow text in front of an address, such as `email=` or a URL path. Escaped quotes inside a quoted part are not supported either. Both limits are listed in `docs/REDACTION.md`.
+
+## 52. Three more formats are matched directly in the patterns, with no normalization step
+
+Three values got past the sanitizer: `josé@example.test`, a card grouped with no-break spaces (U+00A0), and nine full-width digits (`０００１２３４５６`).
+
+- **Emails.** The letter and digit classes of the local part and the domain are now `\p{L}` and `\p{N}` (plus combining marks after the first character), and the pattern uses the `u` flag. This covers accented local parts, decomposed accents and internationalized domains.
+- **Cards.** The separator between digits is one space, one no-break space or one hyphen.
+- **Digits.** A named class, `DIGIT`, accepts ASCII digits and full-width digits U+FF10 to U+FF19. Cards and SSNs both use it, including their "not attached to another digit" boundaries, so a full-width card is redacted too and nine full-width digits followed by a tenth digit are still not an SSN.
+
+A normalized copy of the message (NFKC, or a table of look-alike characters) was rejected. Normalization can change the length of the text, so match positions would have to be mapped back to the original, and it would turn the sanitizer into a general system with its own failure modes. Matching the original string keeps every position exact: each of the added characters is one UTF-16 unit, and the email pattern's `u` flag does not change how `match.index` is counted. The function still returns a new string and the original message is still the one encrypted.
+
+Deliberately left out, and listed in `docs/REDACTION.md`: other Unicode spaces (U+202F, zero-width), digits of other scripts, the full-width at sign, and no-break spaces inside an SSN. Each would be one more character in a class; they were not added without a reported case because every addition also widens the false positives.
+
+Cost: letters of any alphabet can now belong to a local part, so text written without spaces directly before an address (as in Chinese or Japanese) is redacted with it, up to 64 characters.

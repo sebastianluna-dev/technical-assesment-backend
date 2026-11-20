@@ -12,12 +12,16 @@ interface Span {
 }
 
 /**
- * EMAIL, built from named parts. The local part (before the @) has two forms:
+ * EMAIL, built from named parts. "Letter" and "digit" mean any Unicode letter
+ * or number (\p{L}, \p{N}), so josé@example.test and john@münchen.example are
+ * matched like their ASCII counterparts. The local part (before the @) has
+ * two forms:
  *
- * - Unquoted: up to 64 letters, digits and . _ % + - ' (plus and dot aliases,
- *   and names such as o'connor). It cannot start with a dot or an apostrophe,
- *   so a quote mark placed around an address stays in the text. The length
- *   bound keeps matching linear on long inputs without an @.
+ * - Unquoted: up to 64 letters, digits, combining marks and . _ % + - ' (plus
+ *   and dot aliases, and names such as o'connor). It cannot start with a dot,
+ *   a mark or an apostrophe, so a quote mark placed around an address stays
+ *   in the text. The length bound keeps matching linear on long inputs
+ *   without an @.
  * - Quoted: anything between two double quotes on one line, which is how an
  *   address carries spaces: "ana garcia"@example.test. The quotes are part of
  *   the address and are redacted with it. No length bound is needed (the scan
@@ -28,14 +32,38 @@ interface Span {
  * The domain is one or more labels and a final label that starts with a
  * letter.
  */
-const UNQUOTED_LOCAL_PART = String.raw`[a-z0-9_%+-][a-z0-9._%+'-]{0,63}`;
+const LETTER_OR_DIGIT = String.raw`\p{L}\p{N}`;
+const UNQUOTED_LOCAL_PART = String.raw`[${LETTER_OR_DIGIT}_%+-][${LETTER_OR_DIGIT}\p{M}._%+'-]{0,63}`;
 const QUOTED_LOCAL_PART = String.raw`"[^"\r\n]+"`;
-const DOMAIN_LABEL = String.raw`[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`;
-const TOP_LEVEL_LABEL = String.raw`[a-z][a-z0-9-]{0,61}[a-z0-9]`;
+const DOMAIN_LABEL = String.raw`[${LETTER_OR_DIGIT}](?:[${LETTER_OR_DIGIT}\p{M}-]{0,61}[${LETTER_OR_DIGIT}\p{M}])?`;
+const TOP_LEVEL_LABEL = String.raw`\p{L}[${LETTER_OR_DIGIT}\p{M}-]{0,61}[${LETTER_OR_DIGIT}\p{M}]`;
 
 const EMAIL_PATTERN = new RegExp(
   `(?:${QUOTED_LOCAL_PART}|${UNQUOTED_LOCAL_PART})@(?:${DOMAIN_LABEL}\\.)+${TOP_LEVEL_LABEL}`,
-  "gi",
+  "gu",
+);
+
+/**
+ * Cards and SSNs are matched on the message as typed, with no normalized
+ * copy, so every match position is a position in the original string.
+ *
+ * DIGIT: an ASCII digit or its full-width form (０ to ９, U+FF10 to U+FF19),
+ * as produced by East Asian input methods. Both are one UTF-16 unit.
+ *
+ * CARD_SEPARATOR: one space, one no-break space (U+00A0, common in text
+ * pasted from web pages and documents) or one hyphen.
+ */
+const DIGIT = String.raw`[0-9０-９]`;
+const CARD_SEPARATOR = String.raw`[  -]`;
+
+const CREDIT_CARD_PATTERN = new RegExp(
+  `(?<!${DIGIT})${DIGIT}(?:${CARD_SEPARATOR}?${DIGIT}){12,18}(?!${DIGIT})`,
+  "g",
+);
+
+const SSN_PATTERN = new RegExp(
+  `(?<!${DIGIT})(?:${DIGIT}{3}-${DIGIT}{2}-${DIGIT}{4}|${DIGIT}{9})(?!${DIGIT})`,
+  "g",
 );
 
 /**
@@ -44,25 +72,16 @@ const EMAIL_PATTERN = new RegExp(
  *
  * EMAIL: see EMAIL_PATTERN above.
  *
- * CREDIT_CARD: 13 to 19 digits, each optionally preceded by one space or one
- * hyphen, not directly attached to another digit. No Luhn check on purpose.
+ * CREDIT_CARD: 13 to 19 digits, each optionally preceded by one separator,
+ * not directly attached to another digit. No Luhn check on purpose.
  *
  * SSN: XXX-XX-XXXX or exactly nine digits, not directly attached to another
  * digit.
  */
 const DETECTORS: readonly Detector[] = [
-  {
-    kind: "EMAIL",
-    pattern: EMAIL_PATTERN,
-  },
-  {
-    kind: "CREDIT_CARD",
-    pattern: /(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)/g,
-  },
-  {
-    kind: "SSN",
-    pattern: /(?<!\d)(?:\d{3}-\d{2}-\d{4}|\d{9})(?!\d)/g,
-  },
+  { kind: "EMAIL", pattern: EMAIL_PATTERN },
+  { kind: "CREDIT_CARD", pattern: CREDIT_CARD_PATTERN },
+  { kind: "SSN", pattern: SSN_PATTERN },
 ];
 
 const PRIORITY: Record<RedactionKind, number> = {

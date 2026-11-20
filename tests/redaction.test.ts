@@ -36,6 +36,14 @@ describe("redactMessage: emails", () => {
     expect(redactMessage(redactMessage(email))).toBe(EMAIL);
   });
 
+  it.each(["josé@example.test", "jose\u0301@example.test", "john@münchen.example"])(
+    "redacts %s completely",
+    (email) => {
+      expect(redactMessage(email)).toBe(EMAIL);
+      expect(redactMessage(`Señor: ${email}, gracias.`)).toBe(`Señor: ${EMAIL}, gracias.`);
+    },
+  );
+
   it("keeps quote marks that only surround an address", () => {
     expect(redactMessage("'ana@example.test'")).toBe(`'${EMAIL}'`);
     expect(redactMessage('"ana@example.test"')).toBe(`"${EMAIL}"`);
@@ -82,6 +90,12 @@ describe("redactMessage: credit cards", () => {
     expect(redactMessage(text)).toBe(text);
   });
 
+  it("redacts cards grouped with no-break spaces or written in full-width digits", () => {
+    expect(redactMessage("4111\u00A01111\u00A01111\u00A01111")).toBe(CARD);
+    expect(redactMessage("Card:\u00A04111\u00A01111 1111-1111.")).toBe(`Card:\u00A0${CARD}.`);
+    expect(redactMessage("４１１１ １１１１ １１１１ １１１１")).toBe(CARD);
+  });
+
   it("redacts two cards separated by one space as two cards", () => {
     expect(redactMessage("4111111111111111 5500000000000004")).toBe(
       `${CARD} ${CARD}`,
@@ -107,6 +121,26 @@ describe("redactMessage: SSNs", () => {
     ["a US phone number", "555-123-4567"],
   ])("leaves %s alone", (_label, text) => {
     expect(redactMessage(text)).toBe(text);
+  });
+});
+
+describe("redactMessage: full-width SSNs", () => {
+  it("redacts nine full-width digits and the dashed form", () => {
+    expect(redactMessage("０００１２３４５６")).toBe(SSN);
+    expect(redactMessage("０００-１２-３４５６")).toBe(SSN);
+    expect(redactMessage("SSN：０００１２３４５６。")).toBe(`SSN：${SSN}。`);
+  });
+
+  it("applies the same digit boundaries to full-width and mixed digits", () => {
+    expect(redactMessage("０００１２３４５")).toBe("０００１２３４５");
+    expect(redactMessage("０００１２３４５６7")).toBe("０００１２３４５６7");
+    expect(redactMessage("1０００１２３４５６")).toBe("1０００１２３４５６");
+  });
+
+  it("replaces each value at its own position in a mixed message", () => {
+    const message = "a ０００１２３４５６ b josé@example.test c 4111\u00A01111\u00A01111\u00A01111 d 😀 123-45-6789";
+    expect(redactMessage(message)).toBe(`a ${SSN} b ${EMAIL} c ${CARD} d 😀 ${SSN}`);
+    expect(redactMessage(redactMessage(message))).toBe(redactMessage(message));
   });
 });
 
@@ -348,11 +382,10 @@ describe("redactMessage: adversarial inputs", () => {
   });
 
   it("documents what look-alike characters do not trigger", () => {
-    const fullWidth = "４１１１１１１１１１１１１１１１";
     const zeroWidth = "4111​1111​1111​1111";
     const lineBreaks = "4111\n1111\n1111\n1111";
 
-    for (const input of [fullWidth, zeroWidth, lineBreaks, "john＠example.com"]) {
+    for (const input of [zeroWidth, lineBreaks, "john＠example.com"]) {
       expect(redactMessage(input)).toBe(input);
     }
   });

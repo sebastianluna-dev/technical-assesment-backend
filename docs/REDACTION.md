@@ -4,9 +4,9 @@
 
 | Kind | Token | Detected |
 | --- | --- | --- |
-| Email | `<REDACTED: EMAIL>` | `local@domain.tld`, including plus and dot aliases such as `john.doe+billing@mail.example.co.uk`, apostrophes (`o'connor@example.test`) and quoted local parts with spaces (`"ana garcia"@example.test`, quotes included) |
-| Credit card candidate | `<REDACTED: CREDIT_CARD>` | 13 to 19 digits, written together or with a single space or hyphen between digits, in any grouping |
-| SSN | `<REDACTED: SSN>` | `XXX-XX-XXXX`, or exactly nine consecutive digits |
+| Email | `<REDACTED: EMAIL>` | `local@domain.tld`, including plus and dot aliases such as `john.doe+billing@mail.example.co.uk`, apostrophes (`o'connor@example.test`), quoted local parts with spaces (`"ana garcia"@example.test`, quotes included) and letters of any alphabet in the local part or the domain (`josé@example.test`, `john@münchen.example`) |
+| Credit card candidate | `<REDACTED: CREDIT_CARD>` | 13 to 19 digits, written together or with a single space, no-break space (U+00A0) or hyphen between digits, in any grouping. Digits may be ASCII or full-width (`４１１１…`) |
+| SSN | `<REDACTED: SSN>` | `XXX-XX-XXXX`, or exactly nine consecutive digits. Digits may be ASCII or full-width (`０００１２３４５６`, `０００-１２-３４５６`) |
 
 ## Rules
 
@@ -25,7 +25,7 @@
 ### Emails
 
 - Obfuscated addresses: `john at example dot com`, `john @ example.com`.
-- Non-ASCII characters in the local part or the domain: `josé@example.com`, `john@münchen.de`. Punycode domains (`xn--...`) are detected.
+- A full-width at sign or dot: `john＠example.com`, `john@example．com`.
 - IP-literal domains: `user@[192.168.0.1]`.
 - Quoted local parts that span lines or contain an escaped quote. `"a\"b"@example.com` becomes `"a\<REDACTED: EMAIL>`. A quoted part mixed with an unquoted one (`"ana garcia".x@example.com`) is only redacted from the last dot on.
 - Domains with no dot: `john@localhost`.
@@ -34,8 +34,8 @@
 
 ### Credit cards
 
-- Separators other than one space or one hyphen: dots, slashes, tabs, line breaks, or two spaces (`4111.1111.1111.1111`, `4111  1111  1111  1111`).
-- Digits that are not ASCII, such as full-width `４１１１…`.
+- Separators other than one space, one no-break space (U+00A0) or one hyphen: dots, slashes, tabs, line breaks, two spaces, and other Unicode spaces such as the narrow no-break space U+202F or the zero-width space (`4111.1111.1111.1111`, `4111  1111  1111  1111`).
+- Digits of other scripts (Arabic-Indic `٤١١١…`, Devanagari). Only ASCII and full-width digits count.
 - Numbers written in words, or split across separate messages.
 - Fewer than 13 digits, or 20 or more digits written together.
 - A grouped number longer than 19 digits is only partly hidden: `1234 5678 9012 3456 7890 1234` becomes `<REDACTED: CREDIT_CARD> 7890 1234`.
@@ -43,7 +43,8 @@
 
 ### SSNs
 
-- Any other format: spaces (`123 45 6789`), dots, or other groupings.
+- Any other format: spaces or no-break spaces (`123 45 6789`), dots, or other groupings.
+- Digits of other scripts. Only ASCII and full-width digits count.
 - Partial SSNs, such as the last four digits.
 - Nine digits directly attached to more digits.
 
@@ -73,6 +74,7 @@ Not affected: 10-digit phone numbers (`555-123-4567`, `5512345678`), ZIP+4 with 
 ### As an email
 
 - Anything in the form `text@name.tld`, such as some package or resource identifiers (`user@host.example` in a connection string). A social handle like `@name` is not matched because it has no local part.
+- Text written without spaces in front of an address. Letters of any alphabet can belong to a local part, so in `联系我john@example.com` the three characters before `john` are redacted with it (up to 64 characters).
 
 ## Why it leans toward redacting
 
