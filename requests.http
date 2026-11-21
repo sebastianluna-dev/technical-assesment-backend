@@ -84,6 +84,7 @@ Content-Type: application/json
 
 ### 6. Invalid: malformed JSON
 # Expected: 400  {"error":"Malformed JSON"}
+# The body below is cut off on purpose, so the editor marks it as an error.
 
 POST {{inquiryUrl}}
 Content-Type: application/json
