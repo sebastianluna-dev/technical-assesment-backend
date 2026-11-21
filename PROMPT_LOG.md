@@ -774,3 +774,24 @@ Every request in the file was read from it by a throwaway script and sent with `
 - The Docker commands in the comments were not re-run for this prompt; they are the ones verified in entries 15 and 16.
 - Nothing was pushed.
 
+---
+
+## 18. Environment variable to force the AI client to fail
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> create a env var to force the fail in the ai client
+
+**Outcome:**
+
+- No new variable was created: `MOCK_AI_FAILURE_RATE` already does this. With the value `1` every call to the mock AI fails, deterministically. A second variable for the same effect would need a precedence rule between the two.
+- The local `.env` (not in Git) did not set it, so the line `MOCK_AI_FAILURE_RATE=0` was added there with a comment. Changing it to `1` and restarting the server forces the failure.
+- No application code, tests or other documentation changed.
+
+**Checks:**
+
+- The failing configuration was exercised in entry 17: with `MOCK_AI_FAILURE_RATE=1`, four requests returned 503 and the fourth skipped the delay.
+- Not checked: the server was not restarted with the edited `.env`.
+
