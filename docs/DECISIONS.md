@@ -407,3 +407,13 @@ The prompt asked for a local JSON file as the mock database for audit records. `
 - **Docker keeps the named volume.** A bind mount to `./data` would put the file in the repository folder, which is easier to open. It was not adopted for three reasons: on Linux the container's unprivileged user often cannot write to a host directory that Docker created; the manual demo isolates its data by Compose project name, which only works with a named volume; and records already stored in an existing volume would be left behind. The README now says where the file is in each way of running the server and gives the two commands to read it.
 - **A flaky test was fixed.** While running the suite, one run in about ten failed in `tests/secureInquiry.test.ts`. Leak checks searched for short digit fragments such as `4111` in text that also holds random request IDs, and a UUID can contain those digits. The fragments now include a separator from the original value (`4111 1111`, `.1111`, `/ 0004`), which cannot occur in a UUID or in base64. The exact comparison of the prompt and of `redactedMessage` against the expected text is unchanged, so a partly redacted value is still caught.
 
+## 61. `requests.http` for the VS Code REST Client
+
+A request file in the project root with the scenarios of the manual demo, so they can be sent from the editor.
+
+- **It targets the default port, 3000.** Unlike the recording guide, it does not set a Compose project name: it is meant for everyday use with `npm run dev` or `docker compose up`. One `@baseUrl` variable changes the target.
+- **The four breaker requests are separate blocks.** REST Client sends one request per click and has no loop, so 9a to 9d are written out and sent in order. Each carries its number in the message, which makes the four audit records easy to tell apart.
+- **Failures are configured from the command line.** `MOCK_AI_FAILURE_RATE=1 MOCK_AI_DELAY_MS=2000 npm run dev`, or the existing `compose.failing-ai.yaml` in Docker. Variables set on the command line take precedence over `.env`, so `.env` is never edited.
+- **No secrets and no audit endpoint.** The file needs no key. The audit records are read from the JSON file, as the comments explain; an HTTP endpoint to read them was not added, because it would expose user IDs and redacted messages without authentication.
+- **No application code changed.** The file is excluded from the Docker image.
+

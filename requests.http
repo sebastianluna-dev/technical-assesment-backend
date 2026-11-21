@@ -1,0 +1,225 @@
+# Requests for the VS Code REST Client extension (humao.rest-client).
+# Click "Send Request" above a request line to run it.
+#
+# Start the server first, in a terminal:
+#
+#   npm run dev                      local, reads ENCRYPTION_KEY from .env
+#   docker compose up --build        or in Docker, same port
+#
+# All data below is synthetic. This file holds no key and needs none:
+# the key stays in .env, which only the server reads.
+#
+# Timings assume the default MOCK_AI_DELAY_MS=2000 and MOCK_AI_FAILURE_RATE=0.
+# REST Client shows the status and the elapsed time at the top of the
+# response tab.
+
+@baseUrl = http://localhost:3000
+@inquiryUrl = {{baseUrl}}/secure-inquiry
+
+
+### 1. Health
+# Expected: 200  {"status":"ok"}  in a few milliseconds.
+
+GET {{baseUrl}}/health
+
+
+### 2. Valid inquiry with an email, a card number and an SSN
+# Expected: 200  {"answer":"Generated Answer"}  in about 2 seconds
+# (the mock AI's delay).
+# The AI receives the redacted text only. The audit record holds
+#   "redactedMessage": "Hi, I am Ana. Email <REDACTED: EMAIL>, card
+#                       <REDACTED: CREDIT_CARD>, SSN <REDACTED: SSN>."
+# and the original message encrypted (see "Audit records" below).
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-1",
+  "message": "Hi, I am Ana. Email ana.demo@example.test, card 4111 1111 1111 1111, SSN 123-45-6789."
+}
+
+
+### 3. Valid inquiry without sensitive data
+# Expected: 200  {"answer":"Generated Answer"}  in about 2 seconds.
+# Nothing to redact: the audit record's redactedMessage equals the message.
+# The original is still stored encrypted.
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-1",
+  "message": "What are your opening hours on Saturday?"
+}
+
+
+### 4. Invalid: message is missing
+# Expected: 400 in a few milliseconds.
+#   {"error":"Invalid request","details":["message is required"]}
+# Requests 4 to 8 never reach the AI and leave no audit record.
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-1"
+}
+
+
+### 5. Invalid: blank userId, wrong type and an extra property
+# Expected: 400 with every problem at once, and no submitted value repeated:
+#   {"error":"Invalid request","details":["userId must not be blank",
+#    "message must be a string","Only userId and message are allowed"]}
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "",
+  "message": 42,
+  "role": "admin"
+}
+
+
+### 6. Invalid: malformed JSON
+# Expected: 400  {"error":"Malformed JSON"}
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{ "userId": "http-user-1", "message":
+
+
+### 7. Invalid: wrong content type
+# Expected: 415  {"error":"Content-Type must be application/json"}
+
+POST {{inquiryUrl}}
+Content-Type: text/plain
+
+My SSN is 123-45-6789
+
+
+### 8. Unknown path
+# Expected: 404  {"error":"Not Found"}
+
+GET {{baseUrl}}/does-not-exist
+
+
+########################################################################
+# Circuit breaker: four requests, sent one after another
+########################################################################
+#
+# The mock's settings are read when the server starts, so making it fail
+# needs a restart. Stop the server (Ctrl+C) and start it with the mock
+# failing every time after 2,000 ms:
+#
+#   Local:    MOCK_AI_FAILURE_RATE=1 MOCK_AI_DELAY_MS=2000 npm run dev
+#   Docker:   docker compose -f compose.yaml -f compose.failing-ai.yaml up -d
+#
+# Variables given on the command line win over the ones in .env, so .env
+# is not edited.
+#
+# Then send 9a, 9b, 9c and 9d in order, waiting for each response before
+# the next. Do not restart the server or save a source file in between
+# (npm run dev restarts on save): the breaker lives in memory, and a new
+# process starts closed. Send 9d within 30 seconds of 9c; after that the
+# circuit lets one probe through and 9d takes 2 seconds again.
+#
+# Expected:
+#   9a  503  {"answer":"Service Busy"}  about 2 s    first failure
+#   9b  503  {"answer":"Service Busy"}  about 2 s    second failure
+#   9c  503  {"answer":"Service Busy"}  about 2 s    third failure, opens the circuit
+#   9d  503  {"answer":"Service Busy"}  a few ms     circuit open, AI not called
+#
+# All four are audited: outcomes ai_failure, ai_failure, ai_failure,
+# circuit_open.
+
+### 9a. Breaker, request 1 of 4 (503 in about 2 s)
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-2",
+  "message": "Breaker request 1. My SSN is 123-45-6789"
+}
+
+
+### 9b. Breaker, request 2 of 4 (503 in about 2 s)
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-2",
+  "message": "Breaker request 2. My SSN is 123-45-6789"
+}
+
+
+### 9c. Breaker, request 3 of 4 (503 in about 2 s, opens the circuit)
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-2",
+  "message": "Breaker request 3. My SSN is 123-45-6789"
+}
+
+
+### 9d. Breaker, request 4 of 4 (503 in a few milliseconds)
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-2",
+  "message": "Breaker request 4. My SSN is 123-45-6789"
+}
+
+
+########################################################################
+# Restore normal configuration
+########################################################################
+#
+# Stop the failing server and start it again without the two variables:
+#
+#   Local:    Ctrl+C, then  npm run dev
+#   Docker:   docker compose up -d
+#
+# The new process has a closed circuit because it restarted, not because
+# it recovered. Recovery inside one process is shown by  npm run demo.
+
+### 10. After the restart
+# Expected: 200  {"answer":"Generated Answer"}  in about 2 seconds.
+
+POST {{inquiryUrl}}
+Content-Type: application/json
+
+{
+  "userId": "http-user-3",
+  "message": "Is the service back?"
+}
+
+
+########################################################################
+# Audit records
+########################################################################
+#
+# Every request that passed validation (2, 3, 9a to 9d, 10) added one
+# record, in order, to the JSON audit file. There is no HTTP endpoint for
+# it; open the file:
+#
+#   Local:    data/audit-log.json  (open it in the editor; the path can be
+#             changed with AUDIT_LOG_PATH)
+#   Docker:   docker compose exec api cat /app/data/audit-log.json
+#
+# In each record:
+#   userId, timestamp, outcome   readable
+#   redactedMessage              readable, with <REDACTED: ...> tokens
+#   originalMessage              ciphertext, iv and tag (AES-256-GCM)
+#
+# Searching the file for "4111 1111", 123-45-6789 or ana.demo finds nothing.
+# The file is ignored by Git. Deleting it while the server is stopped
+# starts a new, empty log.

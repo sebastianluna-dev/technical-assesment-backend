@@ -23,4 +23,5 @@ docs/
 Dockerfile
 compose.yaml
 compose.failing-ai.yaml
+requests.http
 vitest.config.ts

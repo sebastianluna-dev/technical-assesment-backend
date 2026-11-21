@@ -256,6 +256,16 @@ The only difference from `npm start` is the mock AI: in the demo it has a switch
 
 A step-by-step version with `curl` against the Docker container, written for recording a short video, is in [docs/manual-demo.md](docs/manual-demo.md).
 
+### Requests from VS Code
+
+[requests.http](requests.http) holds the same scenarios for the [REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension: health, valid and invalid inquiries, and the four circuit breaker requests.
+
+1. Install the REST Client extension in VS Code.
+2. Start the server with `npm run dev` or `docker compose up --build`.
+3. Open `requests.http` and click **Send Request** above a request. The response opens beside it with its status and time.
+
+The comments in the file give the expected result of each request, the restart the circuit breaker requests need, and where to read the audit records. If the server is on another port, change `@baseUrl` at the top.
+
 ### Showing the circuit breaker by hand
 
 With the real server, the mock can be made to fail every time and to take a visible amount of time:
@@ -475,5 +485,6 @@ docs/
   DECISIONS.md      implementation decisions and their reasons
   REDACTION.md      redaction rules, limits and false positives
 PROMPT_LOG.md       prompts given to the AI assistant and their outcomes
+requests.http       requests for the VS Code REST Client extension
 Dockerfile, compose.yaml
 ```

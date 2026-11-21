@@ -732,3 +732,45 @@ Every command in the guide was run in order against the container built from the
 - Persistence was tested with clean stops (`kill`, `docker compose restart`), not with a crash in the middle of a write; the repository tests cover that the file on disk is always complete JSON.
 - The test volume was deleted afterwards. Nothing was pushed.
 
+---
+
+## 17. Request file for the VS Code REST Client
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Create a requests.http file in the project root for the VS Code REST Client extension. Review the existing routes and configuration first, and use a reusable @baseUrl variable. Include clearly labeled requests separated by ### for the health endpoint, a valid inquiry containing synthetic email, credit card, and SSN data, an inquiry without sensitive data, and representative invalid requests.
+>
+> Add a circuit breaker demonstration with four requests to run sequentially. Explain in comments how to configure deterministic mock failures and a 2,000 ms delay, including any required restart. Keep the same server process running between those requests so the fourth skips the mock delay. Document the expected status, response, and approximate timing for each scenario.
+>
+> Use comments to explain how to inspect the corresponding JSON audit records and restore normal configuration. Keep secrets out of the file, reuse existing functionality, and add a short README instruction for running requests with Send Request.
+
+**Outcome:**
+
+- Reviewed the routes, the validation messages, the error handler, the environment settings, `compose.failing-ai.yaml` and `docs/manual-demo.md`.
+- Added `requests.http`: health, an inquiry with an email, a card and an SSN, an inquiry with nothing to redact, five invalid requests (missing field, several problems at once, malformed JSON, wrong content type, unknown path), four breaker requests and one request after restoring.
+- Comments give the expected status, body and timing of each request, the restart with the failing mock (local and Docker), how to restore, and where the audit file is.
+- Added "Requests from VS Code" to the README and the file to the project layout and to `.dockerignore`. No application code changed (decision 61).
+
+**Checks:**
+
+Every request in the file was read from it by a throwaway script and sent with `curl`, in order, to a local server with a generated key and a temporary audit file.
+
+| Check | Result |
+| --- | --- |
+| 1. Health | 200, `{"status":"ok"}` |
+| 2 and 3. Valid inquiries | 200, `Generated Answer`, 2.02 s and 2.01 s |
+| 4 to 8. Invalid requests | 400, 400, 400, 415, 404 with the bodies written in the comments, about 1 ms each |
+| Restart with `MOCK_AI_FAILURE_RATE=1 MOCK_AI_DELAY_MS=2000`, then 9a to 9d | 503 in 2.02 s, 2.01 s, 2.01 s, then 503 in 0.006 s |
+| Restart without them, then 10 | 200 in 2.02 s |
+| Audit file | 7 records in order: `answered` ×2, `ai_failure` ×3, `circuit_open`, `answered`; no record for requests 4 to 8 |
+| Audit file searched for the card, the SSN and the email | 0 matches |
+| A variable set on the command line against the same one in an env file | The command line wins |
+
+**Not checked:**
+
+- The file was not run inside VS Code with the REST Client extension itself; the requests were replayed with `curl`. How the extension sends the unfinished JSON body of request 6 was therefore not observed.
+- The Docker commands in the comments were not re-run for this prompt; they are the ones verified in entries 15 and 16.
+- Nothing was pushed.
+
