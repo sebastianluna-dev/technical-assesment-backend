@@ -9,7 +9,9 @@ import { createTestApp, FAILURE_THRESHOLD, RESET_MS, type TestApp } from "./help
 const MESSAGE = "My card is 4111 1111 1111 1111, SSN 123-45-6789, write to ana+bank@example.mx";
 const REDACTED =
   "My card is <REDACTED: CREDIT_CARD>, SSN <REDACTED: SSN>, write to <REDACTED: EMAIL>";
-const SENSITIVE = ["4111", "123-45-6789", "ana+bank@example.mx"];
+// Each value holds a space, a hyphen pattern or an "@", so it cannot appear by
+// chance in a random request ID or in base64 ciphertext.
+const SENSITIVE = ["4111 1111", "123-45-6789", "ana+bank@example.mx"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 let t: TestApp;
@@ -364,12 +366,12 @@ describe("POST /secure-inquiry: redaction end to end", () => {
       "all three kinds, repeated",
       "Mail a@example.com and b+x@example.org. Cards 4111 1111 1111 1111, 5500-0000-0000-0004. " +
         "SSNs 123-45-6789, 987654321. Again: a@example.com / 4111 1111 1111 1111 / 123-45-6789",
-      ["a@example.com", "b+x@example.org", "4111", "5500", "123-45-6789", "987654321"],
+      ["a@example.com", "b+x@example.org", "4111 1111", "5500-0000", "123-45-6789", "987654321"],
     ],
     [
       "overlapping matches",
       "4111 1111 1111 1111@example.com then 123456789 0123 4567 and 123-45-6789@example.com",
-      ["4111", "example.com", "123456789", "123-45-6789"],
+      ["4111 1111", "example.com", "123456789", "123-45-6789"],
     ],
     [
       "values at numeric boundaries",
@@ -379,7 +381,7 @@ describe("POST /secure-inquiry: redaction end to end", () => {
     [
       "values wrapped in markup and punctuation",
       '<b>"a@example.com"</b> (123-45-6789); [4111-1111-1111-1111]!',
-      ["a@example.com", "123-45-6789", "4111"],
+      ["a@example.com", "123-45-6789", "4111-1111"],
     ],
     [
       "emails with a quoted local part or an apostrophe",
@@ -389,12 +391,12 @@ describe("POST /secure-inquiry: redaction end to end", () => {
     [
       "accented email, no-break spaces in a card and a full-width SSN",
       "Soy josé@example.test, tarjeta 4111\u00A01111\u00A01111\u00A01111, SSN ０００１２３４５６",
-      ["josé", "example.test", "4111", "1111", "０００１２３４５６", "３４５６"],
+      ["josé", "example.test", "4111\u00A0", "\u00A01111", "０００１２３４５６", "３４５６"],
     ],
     [
       "numbers separated by punctuation and symbols",
       "Card 4111.1111.1111.1111, other card 5500 / 0000 / 0000 / 0004, SSN 123.45.6789",
-      ["4111", "1111", "5500", "0004", "123.45", "6789"],
+      ["4111.", ".1111", "5500 /", "/ 0004", "123.45", ".6789"],
     ],
     [
       "multi-line text with non-ASCII characters",

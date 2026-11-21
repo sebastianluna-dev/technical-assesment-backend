@@ -688,3 +688,47 @@ Every command in the guide was run in order against the container built from the
 - The troubleshooting rows were not reproduced, except the 503 while the failing container is running.
 - No other Compose project of this repository existed on this machine, so "existing records are preserved" was verified for the demo's own volume across restarts, not against a second volume.
 - Nothing was pushed.
+
+---
+
+## 16. Local JSON file as the audit database
+
+**Date:** 2026-11-20
+
+**Prompt (verbatim):**
+
+> Use a local JSON file as the mock database for inquiry audit records. Review the existing audit repository first and reuse its implementation. Store each validated inquiry, including fallback responses, with its request ID, user ID, timestamp, outcome, encrypted original message, and plaintext redacted message. Keep encryption keys outside the JSON file.
+>
+> Use the existing configurable file path, defaulting to data/audit-log.json. Create the directory and file when needed, preserve previous records, and retain atomic writes and protection against concurrent writes within the process. If saving fails, return the existing audit error response.
+>
+> Ensure the data survives server restarts. For Docker, persist the directory through a volume or bind mount and explain exactly where I can inspect the JSON file. Verify persistence with two requests and a restart, and run the existing relevant tests. Keep the solution simple
+
+**Outcome:**
+
+- Reviewed `src/repositories/auditRepository.ts`, the inquiry service, `src/config/env.ts`, the `Dockerfile` and `compose.yaml`. Every requirement in the prompt was already implemented, so no application code changed (decision 60).
+- Added "Where the audit file is" to the README: the location for a local run, for Compose and for `docker run`, the volume name, and the commands to print the file or copy it out of the container.
+- Kept the named volume instead of a bind mount; the reasons are in decision 60.
+- Fixed a flaky leak check in `tests/secureInquiry.test.ts` found while running the suite: short digit fragments could match a random request ID.
+
+**Checks:**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | No errors |
+| `npm test`, before the test fix | 404 tests; 1 failure in the first run, and again in run 10 of a repeat loop, both `4111` found inside a request ID |
+| `npm test`, after the test fix | 404 passed in 60 consecutive runs |
+| Local server, audit path in a directory that did not exist | Directory and file created, file mode `-rw-------` |
+| Local: request, stop the process, start it, request | 200 and 200; 1 record after the stop, 2 after the second request |
+| Local: third start with `MOCK_AI_FAILURE_RATE=1`, one request | 503; third record with outcome `ai_failure` |
+| Local file searched for the card, the SSN, the email and the key | 0 matches |
+| Docker Compose (separate project name and port): request, `docker compose restart api` | 200; the record is still there |
+| Docker Compose: `down`, `up`, second request | 200; both records present, in order |
+| `docker compose exec api cat` and `docker compose cp` | Both return the file; the copy has no card, SSN or email |
+
+**Not checked:**
+
+- A bind mount was not tried.
+- The `docker run` variant in the README was not re-run for this prompt.
+- Persistence was tested with clean stops (`kill`, `docker compose restart`), not with a crash in the middle of a write; the repository tests cover that the file on disk is always complete JSON.
+- The test volume was deleted afterwards. Nothing was pushed.
+

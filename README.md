@@ -357,6 +357,27 @@ docker compose down              # stop; add -v to delete the audit volume too
 
 If port 3000 is taken on your machine, choose another: `HOST_PORT=3001 docker compose up --build`, or `-p 127.0.0.1:3001:3000` with `docker run`.
 
+### Where the audit file is
+
+| How the server runs | Location of the file |
+| --- | --- |
+| `npm run dev` or `npm start` | `data/audit-log.json` in the repository (ignored by Git), or the path in `AUDIT_LOG_PATH` |
+| Docker Compose | `/app/data/audit-log.json` inside the container, stored in the named volume `<project>_audit-data` |
+| `docker run` as above | `/app/data/audit-log.json` inside the container, stored in the volume `secure-inquiry-audit` |
+
+The Compose project name is the repository's folder name unless `COMPOSE_PROJECT_NAME` is set, so the volume is normally `technical-assessment-backend_audit-data`. `docker volume ls` lists it.
+
+On macOS and Windows a named volume is kept inside Docker's virtual machine, so it is not a folder you can open on your disk. Read the file through the container:
+
+```sh
+docker compose exec api cat /app/data/audit-log.json            # print it
+docker compose cp api:/app/data/audit-log.json /tmp/audit.json  # copy it out
+```
+
+A copy holds user IDs and redacted messages as readable text. Keep it out of the repository and delete it when you are done.
+
+The directory and the file are created on the first audited request. The volume outlives the container: `docker compose restart`, `docker compose down` followed by `docker compose up`, and a rebuild all keep the records. Only `docker compose down -v` or `docker volume rm` delete them.
+
 Things to know:
 
 - Both commands publish the port on `127.0.0.1` only, so the service is not reachable from other machines.
